@@ -134,14 +134,37 @@ async def think_and_speak(prompt, thread_id="jarvis_main_thread"):
     result = await jarvis_app.ainvoke(inputs, config=config)
     return result["messages"][-1].content
 
-# ================= THE EARS =================
+# ================= THE EARS (TELEGRAM LISTENER) =================
+
+# 1. Bikin fungsi background buat ngirim sinyal ngetik terus-terusan
+async def keep_typing(chat_id, context):
+    """Looping ngirim status 'typing' tiap 4 detik sampe di-cancel"""
+    while True:
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action='typing')
+            await asyncio.sleep(4) # Kirim ulang sebelum limit 5 detiknya habis
+        except asyncio.CancelledError:
+            break # Berhenti kalau di-cancel
+
+# 2. Update fungsi chat lu
 async def handle_telegram_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.message.chat_id) != TELEGRAM_CHAT_ID: return
+    
     user_message = update.message.text
     print(f"Bos ngetik: {user_message}")
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
-    jarvis_reply = await think_and_speak(user_message)
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🤖 [JARVIS]\n{jarvis_reply}")
+    
+    # Mulai looping "mengetik..." di background
+    typing_task = asyncio.create_task(keep_typing(update.effective_chat.id, context))
+    
+    try:
+        # Biarin Jarvis mikir (Bisa belasan detik)
+        jarvis_reply = await think_and_speak(user_message)
+        
+        # Kirim balasan pas udah kelar
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🤖 [JARVIS]\n{jarvis_reply}")
+    finally:
+        # PENTING: Matiin looping ngetiknya biar ga jalan terus selamanya!
+        typing_task.cancel()
 
 # ================= THE EYES =================
 async def monitor_home_assistant(application):
