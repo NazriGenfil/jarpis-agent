@@ -110,11 +110,14 @@ def buat_pengingat_dinamis(pesan: str, menit_lagi: int) -> str:
     Contoh: 'Ingetin gua cek server 15 menit lagi ya'.
     """
     from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
     
-    run_time = datetime.now() + timedelta(minutes=menit_lagi)
+    # KUNCI JAWABANNYA DI SINI: Paksa pakai waktu Jakarta!
+    tz = ZoneInfo("Asia/Jakarta")
+    run_time = datetime.now(tz) + timedelta(minutes=menit_lagi)
     
-    # Daftarin job baru ke scheduler (Sekali jalan / One-shot)
-    prompt_rahasia = f"Ini adalah pengingat yang lu buat tadi: '{pesan}'. Sampaikan ke Bos dengan gaya asisten yang sigap."
+    # Daftarin job baru ke scheduler
+    prompt_rahasia = f"Ini pengingat yang lu buat tadi untuk Bos Nazri: '{pesan}'. Sampaikan dengan gaya asisten yang sigap."
     
     scheduler.add_job(
         proactive_reminder,
@@ -123,8 +126,7 @@ def buat_pengingat_dinamis(pesan: str, menit_lagi: int) -> str:
         args=[telegram_app, prompt_rahasia]
     )
     
-    return f"Siap Bos! Pengingat untuk '{pesan}' sudah gua set buat {menit_lagi} menit dari sekarang (sekitar jam {run_time.strftime('%H:%M')})."
-
+    return f"Siap Bos! Pengingat untuk '{pesan}' sudah gua set buat {menit_lagi} menit dari sekarang (sekitar jam {run_time.strftime('%H:%M')} WIB)."
 # Update daftar tools lu
 jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis]
 
