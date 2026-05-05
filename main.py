@@ -104,7 +104,6 @@ scheduler = None
 telegram_app = None
 
 @tool
-@tool
 def buat_pengingat_dinamis(pesan: str, waktu_eksekusi: str) -> str:
     """
     GUNAKAN TOOL INI untuk membuat pengingat.
@@ -132,7 +131,7 @@ def buat_pengingat_dinamis(pesan: str, waktu_eksekusi: str) -> str:
         return f"Siap Bos! Pengingat untuk '{pesan}' sudah aman dijadwalkan pada {waktu_eksekusi} WIB."
     except ValueError:
         return "Gagal membuat pengingat. Format waktunya salah."
-        
+
 # Update daftar tools lu
 jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis]
 
