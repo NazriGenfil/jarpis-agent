@@ -8,15 +8,16 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
 # --- LANGCHAIN & LANGGRAPH IMPORTS ---
-from langchain_ollama import ChatOllama
+from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import START, StateGraph, MessagesState
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode, tools_condition
 
-# IMPORT BARU: Versi Async dari SQLite
+# --- MEMORY IMPORTS ---
 import aiosqlite
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langchain_chroma import Chroma
 
 # Load environment variables
 load_dotenv()
@@ -38,53 +39,79 @@ headers_ha = {
     "Content-Type": "application/json",
 }
 
+# ================= SETUP VECTOR DB (LONG TERM MEMORY) =================
+# 1. Inisialisasi Pustakawan (Embedding Model)
+embeddings = OllamaEmbeddings(
+    model="nomic-embed-text", 
+    base_url=OLLAMA_BASE_URL
+)
+
+# 2. Buka Gudang Arsip (ChromaDB)
+vector_store = Chroma(
+    collection_name="jarvis_long_term",
+    embedding_function=embeddings,
+    persist_directory="/app/vector_data"
+)
+
 # ================= THE TOOLS =================
 @tool
 async def get_available_devices() -> str:
-    """Narik SEMUA daftar entity_id (lampu, AC, switch) dari Home Assistant biar Jarvis ga halu."""
-    print("🔧 [TOOL] Jarvis lagi nge-scan seisi rumah...")
+    """Narik SEMUA daftar entity_id dari Home Assistant."""
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{HA_REST_URL}/states", headers=headers_ha) as response:
-            if response.status != 200:
-                return "Gagal ngambil data dari HA bos."
-            
+            if response.status != 200: return "Gagal ngambil data dari HA bos."
             states = await response.json()
-            available_items = []
-            for item in states:
-                entity = item['entity_id']
-                if entity.startswith(('light.', 'switch.', 'climate.')):
-                    nama = item.get('attributes', {}).get('friendly_name', entity)
-                    status = item.get('state', 'unknown')
-                    available_items.append(f"- {nama} (ID: {entity}) -> Status: {status}")
-            
+            available_items = [f"- {i.get('attributes', {}).get('friendly_name', i['entity_id'])} (ID: {i['entity_id']}) -> Status: {i.get('state', 'unknown')}" for i in states if i['entity_id'].startswith(('light.', 'switch.', 'climate.'))]
             return "Daftar perangkat di rumah:\n" + "\n".join(available_items)
 
 @tool
 async def control_device(entity_id: str, action: str) -> str:
-    """Ngeksekusi perintah (turn_on/turn_off) ke perangkat yang valid."""
-    print(f"🔧 [TOOL] Jarvis mau ngeksekusi {action} ke {entity_id}...")
+    """Ngeksekusi perintah (turn_on/turn_off) ke perangkat."""
     domain = entity_id.split('.')[0]
     url = f"{HA_REST_URL}/services/{domain}/{action}"
-    payload = {"entity_id": entity_id}
-    
     async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers_ha, json=payload) as response:
-            if response.status == 200:
-                return f"Berhasil bos! {entity_id} udah di-{action}."
-            else:
-                return f"Gagal eksekusi nih bos. Status code: {response.status}"
+        async with session.post(url, headers=headers_ha, json={"entity_id": entity_id}) as response:
+            return f"Berhasil bos! {entity_id} udah di-{action}." if response.status == 200 else f"Gagal eksekusi. Status code: {response.status}"
 
-jarvis_tools = [get_available_devices, control_device]
+@tool
+def simpen_ingatan_jangka_panjang(fakta: str) -> str:
+    """
+    GUNAKAN TOOL INI JIKA bos ngasih tau fakta penting, preferensi, atau informasi personal yang harus diingat selamanya.
+    Contoh: "Nama pacar gua Lia", "Gua ga suka suhu AC di bawah 20", "Proyek gua namanya Heimdall".
+    """
+    print(f"🧠 [VECTOR DB] Menyimpan kenangan baru: {fakta}")
+    vector_store.add_texts(texts=[fakta])
+    return "Fakta berhasil disimpan ke memori jangka panjang."
+
+@tool
+def ingat_masa_lalu(pertanyaan: str) -> str:
+    """
+    GUNAKAN TOOL INI JIKA bos nanya sesuatu tentang masa lalu, fakta tentang dirinya, atau lu butuh konteks tambahan yang ga ada di chat history.
+    Contoh pertanyaan bos: "Tadi nama pacar gua siapa ya?", "Lu inget ga proyek gua apa?".
+    """
+    print(f"🧠 [VECTOR DB] Mencari kenangan terkait: {pertanyaan}")
+    hasil_pencarian = vector_store.similarity_search(pertanyaan, k=3) # Ambil 3 ingatan paling mirip
+    
+    if not hasil_pencarian:
+        return "Tidak ada ingatan yang cocok di memori jangka panjang."
+    
+    ingatan = "\n".join([f"- {doc.page_content}" for doc in hasil_pencarian])
+    return f"Hasil dari memori jangka panjang:\n{ingatan}"
+
+# Daftarin SEMUA tools
+jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_panjang, ingat_masa_lalu]
 
 # ================= THE BRAIN =================
 llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL).bind_tools(jarvis_tools)
 
 async def call_model(state: MessagesState):
     system_prompt = (
-        "Lu adalah Jarvis, asisten AI cerdas untuk home automation rumah Bos Nazri. "
-        "Jawab santai. Kalau bos minta kontrol alat tapi ID-nya ga jelas, JANGAN ASAL TEBAK. "
-        "Gunakan tool 'get_available_devices' buat ngecek daftar alat yang valid dulu. "
-        "Kalau lu udah tau entity_id yang bener, langsung pake tool 'control_device'."
+        "Lu adalah Jarvis, asisten AI cerdas untuk Bos Nazri. Jawab santai dan cerdas. "
+        "Lu sekarang punya 2 jenis memori:\n"
+        "1. Short-term (chat ini): Otomatis jalan.\n"
+        "2. Long-term (Vector DB): Lu HARUS pakai tool 'simpen_ingatan_jangka_panjang' buat nyatet fakta baru tentang bos, "
+        "dan tool 'ingat_masa_lalu' kalau bos nanya sesuatu yang lu lupa atau ga ada di log chat saat ini.\n"
+        "Kalo urusan Home Assistant, pake tool control_device dan get_available_devices."
     )
     messages_to_process = state["messages"][-10:]
     messages = [SystemMessage(content=system_prompt)] + messages_to_process
@@ -98,7 +125,6 @@ workflow.add_edge(START, "agent")
 workflow.add_conditional_edges("agent", tools_condition)
 workflow.add_edge("tools", "agent")
 
-# Global variable buat nampung app yg udah dicompile nanti di fungsi main()
 jarvis_app = None
 
 # ================= JEMBATAN TELEGRAM <-> LANGGRAPH =================
@@ -110,10 +136,9 @@ async def think_and_speak(prompt, thread_id="jarvis_main_thread"):
 
 # ================= THE EARS =================
 async def handle_telegram_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.message.chat_id) != TELEGRAM_CHAT_ID:
-        return
+    if str(update.message.chat_id) != TELEGRAM_CHAT_ID: return
     user_message = update.message.text
-    print(f"Bos Nazri ngetik: {user_message}")
+    print(f"Bos ngetik: {user_message}")
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     jarvis_reply = await think_and_speak(user_message)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🤖 [JARVIS]\n{jarvis_reply}")
@@ -127,9 +152,7 @@ async def monitor_home_assistant(application):
             await websocket.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
             await websocket.recv()
             
-            print("Jarvis: Mata websocket nyala...")
-            
-            prompt0 = "Sistem Jarvis (Versi AsyncSqliteSaver) sudah berhasil nyala. Bikin sapaan singkat."
+            prompt0 = "Sistem Jarvis (Vector DB Active) berhasil nyala. Bikin sapaan singkat."
             jarvis_response0 = await think_and_speak(prompt0, thread_id="system_alerts")
             await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response0}")
             
@@ -139,26 +162,22 @@ async def monitor_home_assistant(application):
             while True:
                 message = await websocket.recv()
                 event_data = json.loads(message)
-                
                 if event_data.get('type') == 'event':
                     event = event_data['event']
                     entity_id = event['data']['entity_id']
-                    
                     if entity_id == 'switch.obk8c428848_1' and event['data']['new_state']['state'] == 'on':
-                        prompt = "Lampu Bardi kamar dinyalain manual. Bikin notif singkat gaya Jarvis."
+                        prompt = "Lampu Bardi kamar dinyalain manual. Bikin notif."
                         jarvis_response = await think_and_speak(prompt, thread_id="system_alerts")
                         await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response}")
                         await asyncio.sleep(5)
     except Exception as e:
-        print(f"WebSocket HA putus bro: {e}. Entar nyambung lagi...")
+        print(f"WebSocket HA putus bro: {e}")
 
 # ================= MAIN LOOP =================
 async def main():
     global jarvis_app
     
-    # KUNCI FIX NYA DI SINI: Pake AsyncSqliteSaver buat ngelola database pake aiosqlite
     async with AsyncSqliteSaver.from_conn_string("/app/data/jarvis_memory.sqlite") as memory_saver:
-        # Compile graf di dalem context manager ini
         jarvis_app = workflow.compile(checkpointer=memory_saver)
         
         application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
@@ -168,8 +187,7 @@ async def main():
         await application.start()
         await application.updater.start_polling()
         
-        print("Jarvis: Siap diperintah! Ingatan Permanen (Async) aktif, Bos!")
-
+        print("Jarvis: Vector DB Aktif! Siap mengingat masa lalu, Bos!")
         await monitor_home_assistant(application)
         
         while True:
