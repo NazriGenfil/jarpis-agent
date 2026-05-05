@@ -157,7 +157,7 @@ async def main():
     global jarvis_app
     
     # KUNCI FIX NYA DI SINI: Pake AsyncSqliteSaver buat ngelola database pake aiosqlite
-    async with AsyncSqliteSaver.from_conn_string("/app/jarvis_memory.sqlite") as memory_saver:
+    async with AsyncSqliteSaver.from_conn_string("/app/data/jarvis_memory.sqlite") as memory_saver:
         # Compile graf di dalem context manager ini
         jarvis_app = workflow.compile(checkpointer=memory_saver)
         
