@@ -45,6 +45,10 @@ async def monitor_home_assistant():
         await websocket.recv()
         
         print("Jarvis: Mata nyala, siap melototin Home Assistant...")
+        prompt0 = "Sistem jarvis sudah berhasil nyala. Bikin sapaan singkat 1 kalimat gaya Jarvis. jangan panggil 'master' panggil 'sir/bos'"
+        jarvis_response0 = await think_and_speak(prompt0)
+        await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response0}")
+        # await asyncio.sleep(5)
         
         # Subscribe ke event
         subscribe_msg = {"id": 1, "type": "subscribe_events", "event_type": "state_changed"}
