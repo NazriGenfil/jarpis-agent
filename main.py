@@ -104,29 +104,35 @@ scheduler = None
 telegram_app = None
 
 @tool
-def buat_pengingat_dinamis(pesan: str, menit_lagi: int) -> str:
+@tool
+def buat_pengingat_dinamis(pesan: str, waktu_eksekusi: str) -> str:
     """
-    GUNAKAN TOOL INI jika Bos minta diingetin sesuatu dalam waktu tertentu (misal: 30 menit lagi, 2 jam lagi).
-    Contoh: 'Ingetin gua cek server 15 menit lagi ya'.
+    GUNAKAN TOOL INI untuk membuat pengingat.
+    Input waktu_eksekusi HARUS dalam format string 'YYYY-MM-DD HH:MM' di zona Asia/Jakarta.
+    Jika Bos minta '3 hari lagi', 'besok', atau tanggal spesifik, hitung dari WAKTU SAAT INI yang ada di system prompt lu, lalu ubah ke format YYYY-MM-DD HH:MM.
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from zoneinfo import ZoneInfo
     
-    # KUNCI JAWABANNYA DI SINI: Paksa pakai waktu Jakarta!
     tz = ZoneInfo("Asia/Jakarta")
-    run_time = datetime.now(tz) + timedelta(minutes=menit_lagi)
-    
-    # Daftarin job baru ke scheduler
-    prompt_rahasia = f"Ini pengingat yang lu buat tadi untuk Bos Nazri: '{pesan}'. Sampaikan dengan gaya asisten yang sigap."
-    
-    scheduler.add_job(
-        proactive_reminder,
-        'date',
-        run_date=run_time,
-        args=[telegram_app, prompt_rahasia]
-    )
-    
-    return f"Siap Bos! Pengingat untuk '{pesan}' sudah gua set buat {menit_lagi} menit dari sekarang (sekitar jam {run_time.strftime('%H:%M')} WIB)."
+    try:
+        # Konversi teks tanggal dari Jarvis jadi objek waktu beneran
+        run_time = datetime.strptime(waktu_eksekusi, "%Y-%m-%d %H:%M")
+        run_time = run_time.replace(tzinfo=tz)
+        
+        prompt_rahasia = f"Ini pengingat yang lu buat untuk Bos Nazri: '{pesan}'. Sampaikan sekarang dengan gaya asisten yang sigap."
+        
+        scheduler.add_job(
+            proactive_reminder,
+            'date',
+            run_date=run_time,
+            args=[telegram_app, prompt_rahasia]
+        )
+        
+        return f"Siap Bos! Pengingat untuk '{pesan}' sudah aman dijadwalkan pada {waktu_eksekusi} WIB."
+    except ValueError:
+        return "Gagal membuat pengingat. Format waktunya salah."
+        
 # Update daftar tools lu
 jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis]
 
@@ -134,8 +140,11 @@ jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_pan
 llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL).bind_tools(jarvis_tools)
 
 async def call_model(state: MessagesState):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    sekarang = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M")
     system_prompt = (
-        "Lu adalah Jarvis, asisten AI cerdas untuk Bos Nazri. Jawab santai, cerdas, dan ala asisten pribadi yang loyal.\n\n"
+        f"Lu adalah Jarvis, asisten AI cerdas untuk Bos Nazri. WAKTU SAAT INI: {sekarang} WIB. Jawab santai, cerdas, dan ala asisten pribadi yang loyal\n\n"
         "KAPABILITAS LU SAAT INI (TOOLS):\n"
         "1. Memori: 'simpen_ingatan_jangka_panjang' & 'ingat_masa_lalu'.\n"
         "2. Smart Home: 'control_device' & 'get_available_devices'.\n"
