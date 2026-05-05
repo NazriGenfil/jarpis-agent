@@ -100,7 +100,7 @@ def ingat_masa_lalu(pertanyaan: str) -> str:
     ingatan = "\n".join([f"- {doc.page_content}" for doc in hasil_pencarian])
     return f"Hasil dari memori jangka panjang:\n{ingatan}"
 # --- Tambahin variabel global biar tool bisa akses scheduler & bot ---
-scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
+scheduler = None
 telegram_app = None
 
 @tool
@@ -244,27 +244,24 @@ async def proactive_reminder(application, context_prompt):
     await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response}")
 
 def setup_scheduler(application):
+    global scheduler, telegram_app  # INI MANTRA YANG KEMAREN KELUPAAN BRO!
+    telegram_app = application
     
-    # --- JADWAL 1: PENGINGAT GYM ---
-    # Trigger: Setiap Senin, Rabu, Jumat jam 17:00 WIB
-    prompt_gym = "Bos Nazri, ini udah jam 5 sore. Sesuai jadwal, ini waktunya rutinitas angkat beban. Buat kalimat motivasi singkat gaya Jarvis buat ngingetin bos berangkat ke gym sekarang."
+    # Bikin schedulernya DI DALAM sini biar sinkron sama event loop Telegram
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
+    
+    # JADWAL TETAP (GYM)
+    prompt_gym = "Bos Nazri, ini udah jam 5 sore. Waktunya angkat beban! Kasih semangat biar bos berangkat gym."
+    from apscheduler.triggers.cron import CronTrigger
     scheduler.add_job(
         proactive_reminder, 
         CronTrigger(day_of_week='mon,wed,fri', hour=17, minute=0), 
         args=[application, prompt_gym]
     )
 
-    # --- JADWAL 2: CONTOH LAPORAN SERVER MALAM (Opsional, buat bayangan lu) ---
-    # Trigger: Setiap hari jam 22:00 WIB
-    prompt_server = "Ini jam 10 malam. Kasih sapaan singkat bilang kalau lu lagi mulai patroli ngecek keamanan Elderwand dan Nginx Proxy Manager."
-    scheduler.add_job(
-        proactive_reminder,
-        CronTrigger(hour=22, minute=0),
-        args=[application, prompt_server]
-    )
-
     scheduler.start()
-    print("⏳ [SCHEDULER] Sistem Cron Job & Proactive Messaging aktif!")
+    print("⏳ [SCHEDULER] Sistem Cron Job & Dynamic Tool aktif di Event Loop Utama!")
 
 # ================= MAIN LOOP =================
 async def main():
