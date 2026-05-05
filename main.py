@@ -99,9 +99,34 @@ def ingat_masa_lalu(pertanyaan: str) -> str:
     
     ingatan = "\n".join([f"- {doc.page_content}" for doc in hasil_pencarian])
     return f"Hasil dari memori jangka panjang:\n{ingatan}"
+# --- Tambahin variabel global biar tool bisa akses scheduler & bot ---
+scheduler = None
+telegram_app = None
 
-# Daftarin SEMUA tools
-jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_panjang, ingat_masa_lalu]
+@tool
+def buat_pengingat_dinamis(pesan: str, menit_lagi: int) -> str:
+    """
+    GUNAKAN TOOL INI jika Bos minta diingetin sesuatu dalam waktu tertentu (misal: 30 menit lagi, 2 jam lagi).
+    Contoh: 'Ingetin gua cek server 15 menit lagi ya'.
+    """
+    from datetime import datetime, timedelta
+    
+    run_time = datetime.now() + timedelta(minutes=menit_lagi)
+    
+    # Daftarin job baru ke scheduler (Sekali jalan / One-shot)
+    prompt_rahasia = f"Ini adalah pengingat yang lu buat tadi: '{pesan}'. Sampaikan ke Bos dengan gaya asisten yang sigap."
+    
+    scheduler.add_job(
+        proactive_reminder,
+        'date',
+        run_date=run_time,
+        args=[telegram_app, prompt_rahasia]
+    )
+    
+    return f"Siap Bos! Pengingat untuk '{pesan}' sudah gua set buat {menit_lagi} menit dari sekarang (sekitar jam {run_time.strftime('%H:%M')})."
+
+# Update daftar tools lu
+jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis]
 
 # ================= THE BRAIN =================
 llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL).bind_tools(jarvis_tools)
@@ -110,8 +135,9 @@ async def call_model(state: MessagesState):
     system_prompt = (
         "Lu adalah Jarvis, asisten AI cerdas untuk Bos Nazri. Jawab santai, cerdas, dan ala asisten pribadi yang loyal.\n\n"
         "KAPABILITAS LU SAAT INI (TOOLS):\n"
-        "1. Memori: Lu PUNYA tool 'simpen_ingatan_jangka_panjang' dan 'ingat_masa_lalu'. Wajib pake ini buat nyatet/ingat info bos.\n"
-        "2. Smart Home: Lu PUNYA tool 'control_device' dan 'get_available_devices' untuk Home Assistant.\n\n"
+        "1. Memori: 'simpen_ingatan_jangka_panjang' & 'ingat_masa_lalu'.\n"
+        "2. Smart Home: 'control_device' & 'get_available_devices'.\n"
+        "3. Reminder Dinamis: Lu SEKARANG PUNYA tool 'buat_pengingat_dinamis'. Pake ini kalau bos minta diingetin sesuatu (misal: 'Vis, 10 menit lagi ingetin gua matiin kompor').\n"
         "ATURAN KESADARAN DIRI (SANGAT PENTING):\n"
         "Sebelum lu menjanjikan sesuatu ke bos (contoh: ngirim email, bikin alarm, bikin jadwal otomatis/cron job, ngakses kalender, dll), "
         "CEK DULU daftar tool yang lu punya di atas. Jika lu TIDAK PUNYA tool untuk melakukan tugas itu, JANGAN HALU atau berbohong.\n"
