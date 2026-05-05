@@ -17,4 +17,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Jalankan script utama
-CMD ["python", "jarvis_agent.py"]
+CMD ["python", "main.py"]
