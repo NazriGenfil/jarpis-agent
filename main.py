@@ -3,7 +3,6 @@ import asyncio
 import json
 import websockets
 import aiohttp
-import sqlite3 # Import bawaan Python buat database ringan
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
@@ -12,11 +11,14 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 from langchain_ollama import ChatOllama
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import START, StateGraph, MessagesState
-from langgraph.checkpoint.sqlite import SqliteSaver # Obat anti amnesia (Ganti MemorySaver)
 from langchain_core.tools import tool
 from langgraph.prebuilt import ToolNode, tools_condition
 
-# Load environment variables dari file .env
+# IMPORT BARU: Versi Async dari SQLite
+import aiosqlite
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+# Load environment variables
 load_dotenv()
 
 # ================= CONFIGURATION =================
@@ -36,8 +38,7 @@ headers_ha = {
     "Content-Type": "application/json",
 }
 
-# ================= THE TOOLS (TANGAN & MATA BATIN) =================
-
+# ================= THE TOOLS =================
 @tool
 async def get_available_devices() -> str:
     """Narik SEMUA daftar entity_id (lampu, AC, switch) dari Home Assistant biar Jarvis ga halu."""
@@ -45,7 +46,7 @@ async def get_available_devices() -> str:
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{HA_REST_URL}/states", headers=headers_ha) as response:
             if response.status != 200:
-                return "Gagal ngambil data dari Home Assistant bos."
+                return "Gagal ngambil data dari HA bos."
             
             states = await response.json()
             available_items = []
@@ -75,11 +76,9 @@ async def control_device(entity_id: str, action: str) -> str:
 
 jarvis_tools = [get_available_devices, control_device]
 
-# ================= THE BRAIN (LANGGRAPH + OLLAMA) =================
-# 1. Setup LLM & Bind Tools
+# ================= THE BRAIN =================
 llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL).bind_tools(jarvis_tools)
 
-# 2. Node utama AI
 async def call_model(state: MessagesState):
     system_prompt = (
         "Lu adalah Jarvis, asisten AI cerdas untuk home automation rumah Bos Nazri. "
@@ -87,15 +86,11 @@ async def call_model(state: MessagesState):
         "Gunakan tool 'get_available_devices' buat ngecek daftar alat yang valid dulu. "
         "Kalau lu udah tau entity_id yang bener, langsung pake tool 'control_device'."
     )
-    
-    # Ambil 10 pesan terakhir biar VRAM aman
     messages_to_process = state["messages"][-10:]
     messages = [SystemMessage(content=system_prompt)] + messages_to_process
-    
     response = await llm.ainvoke(messages)
     return {"messages": response}
 
-# 3. Rakit Arsitektur Graf LangGraph
 workflow = StateGraph(MessagesState)
 workflow.add_node("agent", call_model)
 workflow.add_node("tools", ToolNode(jarvis_tools))
@@ -103,34 +98,27 @@ workflow.add_edge(START, "agent")
 workflow.add_conditional_edges("agent", tools_condition)
 workflow.add_edge("tools", "agent")
 
-# 4. Setup Checkpointer SQLite (OBAT ANTI AMNESIA)
-# check_same_thread=False wajib ada karena kita pake async/banyak thread
-conn = sqlite3.connect("/app/jarpis_memory.sqlite", check_same_thread=False)
-memory_saver = SqliteSaver(conn)
-jarvis_app = workflow.compile(checkpointer=memory_saver)
+# Global variable buat nampung app yg udah dicompile nanti di fungsi main()
+jarvis_app = None
 
 # ================= JEMBATAN TELEGRAM <-> LANGGRAPH =================
 async def think_and_speak(prompt, thread_id="jarvis_main_thread"):
     config = {"configurable": {"thread_id": thread_id}}
     inputs = {"messages": [HumanMessage(content=prompt)]}
-    
     result = await jarvis_app.ainvoke(inputs, config=config)
     return result["messages"][-1].content
 
-# ================= THE EARS (TELEGRAM LISTENER) =================
+# ================= THE EARS =================
 async def handle_telegram_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.message.chat_id) != TELEGRAM_CHAT_ID:
         return
-
     user_message = update.message.text
     print(f"Bos Nazri ngetik: {user_message}")
-
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
-
     jarvis_reply = await think_and_speak(user_message)
     await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🤖 [JARVIS]\n{jarvis_reply}")
 
-# ================= THE EYES (HA WEBSOCKET - PASSIVE) =================
+# ================= THE EYES =================
 async def monitor_home_assistant(application):
     await asyncio.sleep(3) 
     try:
@@ -141,7 +129,7 @@ async def monitor_home_assistant(application):
             
             print("Jarvis: Mata websocket nyala...")
             
-            prompt0 = "Sistem Jarvis dengan kapabilitas Tool/Tangan & Memori Permanen sudah berhasil nyala. Bikin sapaan singkat 1 kalimat."
+            prompt0 = "Sistem Jarvis (Versi AsyncSqliteSaver) sudah berhasil nyala. Bikin sapaan singkat."
             jarvis_response0 = await think_and_speak(prompt0, thread_id="system_alerts")
             await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response0}")
             
@@ -157,7 +145,7 @@ async def monitor_home_assistant(application):
                     entity_id = event['data']['entity_id']
                     
                     if entity_id == 'switch.obk8c428848_1' and event['data']['new_state']['state'] == 'on':
-                        prompt = "Lampu Bardi kamar baru aja dinyalain manual. Bikin notif singkat gaya Jarvis."
+                        prompt = "Lampu Bardi kamar dinyalain manual. Bikin notif singkat gaya Jarvis."
                         jarvis_response = await think_and_speak(prompt, thread_id="system_alerts")
                         await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response}")
                         await asyncio.sleep(5)
@@ -166,19 +154,26 @@ async def monitor_home_assistant(application):
 
 # ================= MAIN LOOP =================
 async def main():
-    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_telegram_chat))
+    global jarvis_app
     
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-    
-    print("Jarvis: Siap diperintah! Ingatan Permanen aktif, Bos!")
+    # KUNCI FIX NYA DI SINI: Pake AsyncSqliteSaver buat ngelola database pake aiosqlite
+    async with AsyncSqliteSaver.from_conn_string("/app/jarvis_memory.sqlite") as memory_saver:
+        # Compile graf di dalem context manager ini
+        jarvis_app = workflow.compile(checkpointer=memory_saver)
+        
+        application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+        application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_telegram_chat))
+        
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling()
+        
+        print("Jarvis: Siap diperintah! Ingatan Permanen (Async) aktif, Bos!")
 
-    await monitor_home_assistant(application)
-    
-    while True:
-        await asyncio.sleep(3600)
+        await monitor_home_assistant(application)
+        
+        while True:
+            await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
