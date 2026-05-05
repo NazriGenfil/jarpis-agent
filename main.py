@@ -100,7 +100,7 @@ def ingat_masa_lalu(pertanyaan: str) -> str:
     ingatan = "\n".join([f"- {doc.page_content}" for doc in hasil_pencarian])
     return f"Hasil dari memori jangka panjang:\n{ingatan}"
 # --- Tambahin variabel global biar tool bisa akses scheduler & bot ---
-scheduler = None
+scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
 telegram_app = None
 
 @tool
@@ -242,8 +242,6 @@ async def proactive_reminder(application, context_prompt):
     await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response}")
 
 def setup_scheduler(application):
-    # Set zona waktu ke Jakarta (WIB) biar akurat
-    scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
     
     # --- JADWAL 1: PENGINGAT GYM ---
     # Trigger: Setiap Senin, Rabu, Jumat jam 17:00 WIB
