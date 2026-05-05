@@ -5,5 +5,5 @@ python-dotenv>=1.0.0
 langchain-ollama>=0.1.1
 langgraph>=0.2.0
 langchain-core>=0.2.0
-langgraph-checkpoint-sqlite>=1.0.0  <-- INI MOBILNYA
-aiosqlite>=0.20.0                   <-- INI BENSINNYA
+langgraph-checkpoint-sqlite>=1.0.0  
+aiosqlite>=0.20.0                   
