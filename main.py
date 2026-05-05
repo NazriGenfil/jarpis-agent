@@ -105,7 +105,7 @@ workflow.add_edge("tools", "agent")
 
 # 4. Setup Checkpointer SQLite (OBAT ANTI AMNESIA)
 # check_same_thread=False wajib ada karena kita pake async/banyak thread
-conn = sqlite3.connect("jarvis_memory.sqlite", check_same_thread=False)
+conn = sqlite3.connect("jarpis_memory.sqlite", check_same_thread=False)
 memory_saver = SqliteSaver(conn)
 jarvis_app = workflow.compile(checkpointer=memory_saver)
 
