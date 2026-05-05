@@ -9,3 +9,5 @@ langgraph-checkpoint-sqlite>=1.0.0
 aiosqlite>=0.20.0
 chromadb>=0.5.0
 langchain-chroma>=0.1.1
+apscheduler>=3.10.4
+tzdata>=2023.3

@@ -18,6 +18,8 @@ from langgraph.prebuilt import ToolNode, tools_condition
 import aiosqlite
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langchain_chroma import Chroma
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # Load environment variables
 load_dotenv()
@@ -199,6 +201,45 @@ async def monitor_home_assistant(application):
     except Exception as e:
         print(f"WebSocket HA putus bro: {e}")
 
+# ================= THE MOUTH (PROACTIVE SENDER & SCHEDULER) =================
+async def proactive_reminder(application, context_prompt):
+    """
+    Fungsi rahasia buat mancing Jarvis mikir dan ngomong duluan.
+    Kita pancing dia pakai prompt rahasia di background.
+    """
+    print(f"⏰ [SCHEDULER] Trigger aktif: {context_prompt}")
+    
+    # Kita suruh Jarvis mikir di thread khusus 'system_alerts' biar ga ngerusak konteks chat lu yang lagi jalan
+    jarvis_response = await think_and_speak(context_prompt, thread_id="system_alerts")
+    
+    # Jarvis ngirim chat duluan ke bos
+    await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response}")
+
+def setup_scheduler(application):
+    # Set zona waktu ke Jakarta (WIB) biar akurat
+    scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
+    
+    # --- JADWAL 1: PENGINGAT GYM ---
+    # Trigger: Setiap Senin, Rabu, Jumat jam 17:00 WIB
+    prompt_gym = "Bos Nazri, ini udah jam 5 sore. Sesuai jadwal, ini waktunya rutinitas angkat beban. Buat kalimat motivasi singkat gaya Jarvis buat ngingetin bos berangkat ke gym sekarang."
+    scheduler.add_job(
+        proactive_reminder, 
+        CronTrigger(day_of_week='mon,wed,fri', hour=17, minute=0), 
+        args=[application, prompt_gym]
+    )
+
+    # --- JADWAL 2: CONTOH LAPORAN SERVER MALAM (Opsional, buat bayangan lu) ---
+    # Trigger: Setiap hari jam 22:00 WIB
+    prompt_server = "Ini jam 10 malam. Kasih sapaan singkat bilang kalau lu lagi mulai patroli ngecek keamanan Elderwand dan Nginx Proxy Manager."
+    scheduler.add_job(
+        proactive_reminder,
+        CronTrigger(hour=22, minute=0),
+        args=[application, prompt_server]
+    )
+
+    scheduler.start()
+    print("⏳ [SCHEDULER] Sistem Cron Job & Proactive Messaging aktif!")
+
 # ================= MAIN LOOP =================
 async def main():
     global jarvis_app
@@ -212,6 +253,8 @@ async def main():
         await application.initialize()
         await application.start()
         await application.updater.start_polling()
+        
+        setup_scheduler(application)
         
         print("Jarvis: Vector DB Aktif! Siap mengingat masa lalu, Bos!")
         await monitor_home_assistant(application)
