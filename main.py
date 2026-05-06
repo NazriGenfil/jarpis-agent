@@ -132,8 +132,34 @@ def buat_pengingat_dinamis(pesan: str, waktu_eksekusi: str) -> str:
     except ValueError:
         return "Gagal membuat pengingat. Format waktunya salah."
 
-# Update daftar tools lu
-jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis]
+@tool
+def cek_pengingat_aktif() -> str:
+    """
+    GUNAKAN TOOL INI JIKA bos nanya sisa waktu pengingat, timer, jadwal alarm, atau pengingat apa saja yang sedang aktif.
+    """
+    jobs = scheduler.get_jobs()
+    if not jobs:
+        return "Saat ini tidak ada pengingat dinamis yang sedang berjalan, Bos."
+
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Jakarta")
+    now = datetime.now(tz)
+
+    hasil = "Daftar pengingat yang lagi jalan di sistem:\n"
+    for job in jobs:
+        waktu_jalan = job.next_run_time
+        if waktu_jalan:
+            # Hitung sisa waktu beneran secara matematis
+            sisa_waktu = waktu_jalan - now
+            # Format biar rapi dibaca
+            jam, sisa = divmod(sisa_waktu.seconds, 3600)
+            menit, _ = divmod(sisa, 60)
+            hasil += f"- Bakal nyala jam {waktu_jalan.strftime('%H:%M WIB')} (Sisa waktu: {jam} jam {menit} menit lagi)\n"
+            
+    return hasil
+
+jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis, cek_pengingat_aktif]
 
 # ================= THE BRAIN =================
 llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL).bind_tools(jarvis_tools)
@@ -147,7 +173,7 @@ async def call_model(state: MessagesState):
         "KAPABILITAS LU SAAT INI (TOOLS):\n"
         "1. Memori: 'simpen_ingatan_jangka_panjang' & 'ingat_masa_lalu'.\n"
         "2. Smart Home: 'control_device' & 'get_available_devices'.\n"
-        "3. Reminder Dinamis: Lu SEKARANG PUNYA tool 'buat_pengingat_dinamis'. Pake ini kalau bos minta diingetin sesuatu (misal: 'Vis, 10 menit lagi ingetin gua matiin kompor').\n"
+        "3. Reminder Dinamis: Lu PUNYA 'buat_pengingat_dinamis' untuk bikin jadwal, dan 'cek_pengingat_aktif' untuk ngecek sisa waktu alarm yang berjalan. Jangan halu ngitung waktu sendiri!"
         "ATURAN KESADARAN DIRI (SANGAT PENTING):\n"
         "Sebelum lu menjanjikan sesuatu ke bos (contoh: ngirim email, bikin alarm, bikin jadwal otomatis/cron job, ngakses kalender, dll), "
         "CEK DULU daftar tool yang lu punya di atas. Jika lu TIDAK PUNYA tool untuk melakukan tugas itu, JANGAN HALU atau berbohong.\n"
