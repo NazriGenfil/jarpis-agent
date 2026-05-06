@@ -84,7 +84,7 @@ def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     }
     
     try:
-        res = requests.post(HA_URL, headers=HEADERS, json=payload)
+        res = requests.post(HA_URL, headers=HEADERS, json=payload, timeout=10)
         if res.status_code == 200:
             return f"Sukses menjalankan {service} pada {domain}. Bukti response: {res.text}"
         else:
