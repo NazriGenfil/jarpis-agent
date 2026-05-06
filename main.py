@@ -67,13 +67,30 @@ async def get_available_devices() -> str:
             return "Daftar perangkat di rumah:\n" + "\n".join(available_items)
 
 @tool
-async def control_device(entity_id: str, action: str) -> str:
-    """Ngeksekusi perintah (turn_on/turn_off) ke perangkat."""
-    domain = entity_id.split('.')[0]
-    url = f"{HA_REST_URL}/services/{domain}/{action}"
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, headers=headers_ha, json={"entity_id": entity_id}) as response:
-            return f"Berhasil bos! {entity_id} udah di-{action}." if response.status == 200 else f"Gagal eksekusi. Status code: {response.status}"
+def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
+    """
+    GUNAKAN TOOL INI UNTUK SEMUA PERANGKAT SMART HOME!
+    Format Home Assistant:
+    - domain: bagian depan dari entity_id (contoh: 'light', 'switch', 'climate', 'media_player')
+    - service: perintahnya (contoh: 'turn_on', 'turn_off', 'set_temperature', 'set_hvac_mode')
+    - payload: dictionary berisi 'entity_id' dan parameter lain (contoh: {"entity_id": "climate.ac_kamar", "temperature": 23})
+    """
+    import requests
+    
+    HA_URL = f"http://IP_HA_LU:8123/api/services/{domain}/{service}"
+    HEADERS = {
+        "Authorization": "Bearer TOKEN_HA_LU",
+        "Content-Type": "application/json",
+    }
+    
+    try:
+        res = requests.post(HA_URL, headers=HEADERS, json=payload)
+        if res.status_code == 200:
+            return f"Sukses menjalankan {service} pada {domain}. Bukti response: {res.text}"
+        else:
+            return f"Gagal! Status {res.status_code}, Error: {res.text}"
+    except Exception as e:
+        return f"Error koneksi ke HA: {str(e)}"
 
 @tool
 def simpen_ingatan_jangka_panjang(fakta: str) -> str:
@@ -159,7 +176,7 @@ def cek_pengingat_aktif() -> str:
             
     return hasil
 
-jarvis_tools = [get_available_devices, control_device, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis, cek_pengingat_aktif]
+jarvis_tools = [get_available_devices, eksekusi_home_assistant, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis, cek_pengingat_aktif]
 
 # ================= THE BRAIN =================
 llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL).bind_tools(jarvis_tools)
@@ -173,10 +190,10 @@ async def call_model(state: MessagesState):
         "DAFTAR TOOLS YANG LU PUNYA (WAJIB DIPAKAI):\n"
         "- buat_pengingat_dinamis: WAJIB DIPAKAI saat Bos minta dibuatkan alarm, timer, atau pengingat waktu baru.\n"
         "- cek_pengingat_aktif: WAJIB DIPAKAI saat Bos menanyakan sisa waktu pengingat, timer, atau jadwal yang sedang jalan.\n"
-        "- control_device & get_available_devices: Untuk urusan Smart Home.\n"
+        "- eksekusi_home_assistant & get_available_devices: Untuk urusan Smart Home.\n"
         "- simpen_ingatan_jangka_panjang & ingat_masa_lalu: Untuk memori dan data pribadi Bos.\n\n"
-        "- ANTI BOHONG & GASLIGHTING: Setelah lu pakai tool 'control_device', lu WAJIB manggil tool 'get_available_devices' untuk CEK STATUS ASLI. "
-        "JIKA STATUSNYA GAGAL/MASIH NYALA, JANGAN BALAS CHAT BOS DULU! Lu WAJIB langsung memanggil tool 'control_device' lagi untuk mengulang perintah (Auto-Retry maksimal 3 kali) sampai statusnya benar-benar berubah. "
+        "- ANTI BOHONG & GASLIGHTING: Setelah lu pakai tool 'eksekusi_home_assistant', lu WAJIB manggil tool 'get_available_devices' untuk CEK STATUS ASLI. "
+        "JIKA STATUSNYA GAGAL/MASIH NYALA, JANGAN BALAS CHAT BOS DULU! Lu WAJIB langsung memanggil tool 'eksekusi_home_assistant' lagi untuk mengulang perintah (Auto-Retry maksimal 3 kali) sampai statusnya benar-benar berubah. "
         "Lu baru boleh mengirim pesan/laporan ke Bos HANYA JIKA status alat sudah sesuai dengan perintah, atau jika sudah gagal setelah 3 kali mencoba."
         "ATURAN MUTLAK:\n"
         "1. JANGAN PERNAH menebak-nebak sisa waktu atau jam! Lu WAJIB memanggil tool 'cek_pengingat_aktif' jika ditanya sisa waktu.\n"
