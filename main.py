@@ -195,10 +195,12 @@ async def call_model(state: MessagesState):
         "JIKA STATUSNYA GAGAL/MASIH NYALA, JANGAN BALAS CHAT BOS DULU! Lu WAJIB langsung memanggil tool 'eksekusi_home_assistant' lagi untuk mengulang perintah (Auto-Retry maksimal 3 kali) sampai statusnya benar-benar berubah. "
         "Lu baru boleh mengirim pesan/laporan ke Bos HANYA JIKA status alat sudah sesuai dengan perintah, atau jika sudah gagal setelah 3 kali mencoba."
         "ATURAN MUTLAK:\n"
-        "1. JANGAN PERNAH menebak-nebak sisa waktu atau jam! Lu WAJIB memanggil tool 'cek_pengingat_aktif' jika ditanya sisa waktu.\n"
-        "2. JANGAN PERNAH bilang lu tidak punya modul pengingat. Lu SUDAH PUNYA 'buat_pengingat_dinamis'. LANGSUNG panggil toolnya!\n"
-        "3. JIKA Bos meminta tugas DI LUAR alat di atas (misal: kirim email, akses kalender Google), BARU lu boleh jujur bilang belum punya modulnya dan minta diupdate kodenya."
-    )
+        "ATURAN MUTLAK:\n"
+        "1. JANGAN PERNAH membalas chat Bos dengan format JSON, XML, atau tag seperti <tool_call>! Jika lu ingin menggunakan tool, eksekusi tool tersebut secara diam-diam di sistem background.\n" # <--- TAMBAHIN INI BRO
+        "2. JANGAN PERNAH menebak-nebak sisa waktu atau jam! Lu WAJIB memanggil tool 'cek_pengingat_aktif' jika ditanya sisa waktu.\n"
+        "3. JANGAN PERNAH bilang lu tidak punya modul pengingat. Lu SUDAH PUNYA 'buat_pengingat_dinamis'. LANGSUNG panggil toolnya!\n"
+        "4. JIKA Bos meminta tugas DI LUAR alat di atas, BARU lu jujur bilang belum punya modulnya."
+       )
     messages_to_process = state["messages"][-10:]
     messages = [SystemMessage(content=system_prompt)] + messages_to_process
     response = await llm.ainvoke(messages)
@@ -214,7 +216,7 @@ workflow.add_edge("tools", "agent")
 jarvis_app = None
 
 # ================= JEMBATAN TELEGRAM <-> LANGGRAPH =================
-async def think_and_speak(prompt, thread_id="jarvis_main_thread"):
+async def think_and_speak(prompt, thread_id="jarvis_main_thread_v2"):
     config = {"configurable": {"thread_id": thread_id}}
     inputs = {"messages": [HumanMessage(content=prompt)]}
     result = await jarvis_app.ainvoke(inputs, config=config)
