@@ -93,8 +93,8 @@ def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
 @tool
 def simpen_ingatan_jangka_panjang(fakta: str) -> str:
     """
-    GUNAKAN TOOL INI JIKA bos ngasih tau fakta penting, preferensi, atau informasi personal yang harus diingat selamanya.
-    Contoh: "Nama pacar gua Lia", "Gua ga suka suhu AC di bawah 20", "Proyek gua namanya Heimdall".
+    WAJIB GUNAKAN TOOL INI SECARA OTOMATIS DAN PROAKTIF jika Bos menyebutkan fakta penting, preferensi, nama orang, rutinitas, atau curhat tentang kehidupannya.
+    TIDAK PERLU menunggu Bos bilang 'catat' atau 'ingat'. Jika menurutmu informasi tersebut berguna untuk konteks obrolan di masa depan, LANGSUNG panggil tool ini untuk menyimpannya.
     """
     print(f"🧠 [VECTOR DB] Menyimpan kenangan baru: {fakta}")
     vector_store.add_texts(texts=[fakta])
@@ -189,7 +189,7 @@ async def call_model(state: MessagesState):
         "- buat_pengingat_dinamis: WAJIB DIPAKAI saat Bos minta dibuatkan alarm, timer, atau pengingat waktu baru.\n"
         "- cek_pengingat_aktif: WAJIB DIPAKAI saat Bos menanyakan sisa waktu pengingat, timer, atau jadwal yang sedang jalan.\n"
         "- eksekusi_home_assistant & get_available_devices: Untuk urusan Smart Home.\n"
-        "- simpen_ingatan_jangka_panjang: WAJIB DIPAKAI TANPA TERKECUALI setiap kali Bos bilang 'ingat ya', 'catat ini', atau memberikan aturan/SOP/fakta baru. JANGAN cuma diiyakan di chat, LU WAJIB panggil tool ini biar masuk database!\n"
+        "- simpen_ingatan_jangka_panjang: Panggil tool ini SECARA OTOMATIS jika Bos membagikan info personal (curhat), kebiasaan, preferensi, atau SOP baru terkait server/smart home. JANGAN menunggu aba-aba 'catat'! Jadilah asisten yang inisiatif merekam fakta krusial agar tidak lupa di masa depan.\n"
         "- ingat_masa_lalu: Untuk menarik kembali memori atau SOP masa lalu dari database.\n\n"
         "- ANTI BOHONG & GASLIGHTING: Setelah lu pakai tool 'eksekusi_home_assistant', lu WAJIB manggil tool 'get_available_devices' untuk CEK STATUS ASLI. "
         "JIKA STATUSNYA GAGAL/MASIH NYALA, JANGAN BALAS CHAT BOS DULU! Lu WAJIB langsung memanggil tool 'eksekusi_home_assistant' lagi untuk mengulang perintah (Auto-Retry maksimal 3 kali) sampai statusnya benar-benar berubah. "
