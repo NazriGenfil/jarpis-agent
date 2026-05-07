@@ -70,21 +70,19 @@ async def get_available_devices() -> str:
 def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     """
     GUNAKAN TOOL INI UNTUK SEMUA PERANGKAT SMART HOME!
-    Format Home Assistant:
-    - domain: bagian depan dari entity_id (contoh: 'light', 'switch', 'climate', 'media_player')
+    Format Home Headers:
+    - domain: bagian depan dari entity_id (contoh: 'light', 'switch', 'climate')
     - service: perintahnya (contoh: 'turn_on', 'turn_off', 'set_temperature', 'set_hvac_mode')
-    - payload: dictionary berisi 'entity_id' dan parameter lain (contoh: {"entity_id": "climate.ac_kamar", "temperature": 23})
+    - payload: dictionary berisi 'entity_id' dan parameter lain.
     """
     import requests
     
-    HA_URL = f"http://IP_HA_LU:8123/api/services/{domain}/{service}"
-    HEADERS = {
-        "Authorization": "Bearer TOKEN_HA_LU",
-        "Content-Type": "application/json",
-    }
+    # KITA PAKE VARIABEL GLOBAL DARI .ENV LU BUKAN TEKS BOHONGAN LAGI!
+    url = f"{HA_REST_URL}/services/{domain}/{service}"
     
     try:
-        res = requests.post(HA_URL, headers=HEADERS, json=payload, timeout=10)
+        # headers_ha juga udah ada di settingan atas lu
+        res = requests.post(url, headers=headers_ha, json=payload, timeout=10)
         if res.status_code == 200:
             return f"Sukses menjalankan {service} pada {domain}. Bukti response: {res.text}"
         else:
