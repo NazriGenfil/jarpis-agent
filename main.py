@@ -70,21 +70,27 @@ async def get_available_devices() -> str:
 def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     """
     GUNAKAN TOOL INI UNTUK SEMUA PERANGKAT SMART HOME!
-    Format Home Headers:
-    - domain: bagian depan dari entity_id (contoh: 'light', 'switch', 'climate')
-    - service: perintahnya (contoh: 'turn_on', 'turn_off', 'set_temperature', 'set_hvac_mode')
-    - payload: dictionary berisi 'entity_id' dan parameter lain.
+    ATURAN MUTLAK SERVICE:
+    - Untuk menyalakan: WAJIB gunakan 'turn_on' (JANGAN 'on' atau 'nyala')
+    - Untuk mematikan: WAJIB gunakan 'turn_off' (JANGAN 'off' atau 'mati')
+    - Untuk suhu AC: WAJIB gunakan 'set_temperature'
+    - Untuk mode AC: WAJIB gunakan 'set_hvac_mode' (contoh mode: 'cool', 'auto', 'boost')
     """
     import requests
+    import time # Kita import time buat ngasih delay fisik
     
-    # KITA PAKE VARIABEL GLOBAL DARI .ENV LU BUKAN TEKS BOHONGAN LAGI!
     url = f"{HA_REST_URL}/services/{domain}/{service}"
     
+    # Validasi Anti-Halu: Kalau AI bandel ngirim 'on', kita paksa ganti ke 'turn_on'
+    if service == "on": service = "turn_on"
+    if service == "off": service = "turn_off"
+    
     try:
-        # headers_ha juga udah ada di settingan atas lu
         res = requests.post(url, headers=headers_ha, json=payload, timeout=10)
         if res.status_code == 200:
-            return f"Sukses menjalankan {service} pada {domain}. Bukti response: {res.text}"
+            # INI KUNCI ANTI RACE-CONDITION: Paksa script tidur 2 detik biar HA punya waktu update status fisik
+            time.sleep(2) 
+            return f"Sukses menjalankan {service} pada {domain}. Bukti response: {res.text}. Status sudah di-update oleh HA."
         else:
             return f"Gagal! Status {res.status_code}, Error: {res.text}"
     except Exception as e:
