@@ -202,10 +202,12 @@ async def call_model(state: MessagesState):
         "Lu baru boleh mengirim pesan/laporan ke Bos HANYA JIKA status alat sudah sesuai dengan perintah, atau jika sudah gagal setelah 3 kali mencoba."
         "ATURAN MUTLAK:\n"
         "ATURAN MUTLAK:\n"
-        "1. JANGAN PERNAH membalas chat Bos dengan format JSON, XML, atau tag seperti <tool_call>! Jika lu ingin menggunakan tool, eksekusi tool tersebut secara diam-diam di sistem background.\n" # <--- TAMBAHIN INI BRO
-        "2. JANGAN PERNAH menebak-nebak sisa waktu atau jam! Lu WAJIB memanggil tool 'cek_pengingat_aktif' jika ditanya sisa waktu.\n"
-        "3. JANGAN PERNAH bilang lu tidak punya modul pengingat. Lu SUDAH PUNYA 'buat_pengingat_dinamis'. LANGSUNG panggil toolnya!\n"
-        "4. JIKA Bos meminta tugas DI LUAR alat di atas, BARU lu jujur bilang belum punya modulnya."
+        "1. DILARANG ROLEPLAY/HALUSINASI! Lu HARAM hukumnya membalas dengan teks seperti 'Menyalakan lampu...' atau 'Eksekusi perintah...' jika lu BELUM benar-benar mengeksekusi tool 'eksekusi_home_assistant'.\n"
+        "2. KATA 'SEMUA': Jika Bos menyuruh menyalakan/mematikan 'semua lampu' atau 'semua switch', lu WAJIB manggil tool 'get_available_devices' dulu untuk melihat daftar ID-nya. Lalu, panggil tool 'eksekusi_home_assistant' SATU PER SATU untuk masing-masing ID perangkat tersebut. Jangan pernah memalsukan ID atau menebak-nebak!\n"
+        "3. JANGAN PERNAH membalas chat Bos dengan format JSON, XML, atau tag seperti <tool_call>! Jika lu ingin menggunakan tool, eksekusi tool tersebut secara diam-diam di sistem background.\n" # <--- TAMBAHIN INI BRO
+        "4. JANGAN PERNAH menebak-nebak sisa waktu atau jam! Lu WAJIB memanggil tool 'cek_pengingat_aktif' jika ditanya sisa waktu.\n"
+        "5. JANGAN PERNAH bilang lu tidak punya modul pengingat. Lu SUDAH PUNYA 'buat_pengingat_dinamis'. LANGSUNG panggil toolnya!\n"
+        "6. JIKA Bos meminta tugas DI LUAR alat di atas, BARU lu jujur bilang belum punya modulnya."
        )
     messages_to_process = state["messages"][-10:]
     messages = [SystemMessage(content=system_prompt)] + messages_to_process
