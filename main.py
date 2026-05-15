@@ -3,6 +3,8 @@ import asyncio
 import json
 import websockets
 import aiohttp
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
@@ -27,14 +29,11 @@ load_dotenv()
 # ================= CONFIGURATION =================
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = str(os.getenv('TELEGRAM_CHAT_ID'))
-HA_URL = os.getenv('HA_URL') 
 HA_REST_URL = os.getenv('HA_REST_URL') 
+HA_URL = os.getenv('HA_URL') # Websocket URL
 HA_TOKEN = os.getenv('HA_TOKEN')
-OLLAMA_BASE_URL = os.getenv('OLLAMA_URL').replace('/api/generate', '') 
+OLLAMA_BASE_URL = os.getenv('OLLAMA_URL')
 MODEL_NAME = os.getenv('MODEL_NAME')
-
-if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, HA_TOKEN, HA_REST_URL]):
-    raise ValueError("Bro, file .env lu belum lengkap tuh. Cek lagi!")
 
 headers_ha = {
     "Authorization": f"Bearer {HA_TOKEN}",
@@ -42,178 +41,99 @@ headers_ha = {
 }
 
 # ================= SETUP VECTOR DB (LONG TERM MEMORY) =================
-# 1. Inisialisasi Pustakawan (Embedding Model)
-embeddings = OllamaEmbeddings(
-    model="nomic-embed-text", 
-    base_url=OLLAMA_BASE_URL
-)
-
-# 2. Buka Gudang Arsip (ChromaDB)
+# Pastikan persist_directory ini sinkron dengan folder jarvis_vector_data di Elderwand
+embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_BASE_URL)
 vector_store = Chroma(
     collection_name="jarvis_long_term",
     embedding_function=embeddings,
-    persist_directory="/app/vector_data"
+    persist_directory="/app/vector_data" # Folder di Docker
 )
 
 # ================= THE TOOLS =================
 @tool
 async def get_available_devices() -> str:
-    """Narik SEMUA daftar entity_id dari Home Assistant."""
+    """Narik daftar entity_id dari Home Assistant untuk cek status perangkat."""
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{HA_REST_URL}/states", headers=headers_ha) as response:
-            if response.status != 200: return "Gagal ngambil data dari HA bos."
+            if response.status != 200: return "Gagal koneksi ke HA."
             states = await response.json()
-            available_items = [f"- {i.get('attributes', {}).get('friendly_name', i['entity_id'])} (ID: {i['entity_id']}) -> Status: {i.get('state', 'unknown')}" for i in states if i['entity_id'].startswith(('light.', 'switch.', 'climate.'))]
-            return "Daftar perangkat di rumah:\n" + "\n".join(available_items)
+            available = [f"- {i.get('attributes', {}).get('friendly_name', i['entity_id'])} (ID: {i['entity_id']}) -> Status: {i.get('state', 'unknown')}" 
+                         for i in states if i['entity_id'].startswith(('light.', 'switch.', 'climate.'))]
+    return "Status Perangkat:\n" + "\n".join(available)
 
 @tool
 def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
-    """
-    GUNAKAN TOOL INI UNTUK SEMUA PERANGKAT SMART HOME!
-    ATURAN MUTLAK SERVICE:
-    - Untuk menyalakan: WAJIB gunakan 'turn_on' (JANGAN 'on' atau 'nyala')
-    - Untuk mematikan: WAJIB gunakan 'turn_off' (JANGAN 'off' atau 'mati')
-    - Untuk suhu AC: WAJIB gunakan 'set_temperature'
-    - Untuk mode AC: WAJIB gunakan 'set_hvac_mode' (contoh mode: 'cool', 'auto', 'boost')
-    """
+    """Kontrol perangkat Smart Home (AC, Lampu, Switch)."""
     import requests
-    import time # Kita import time buat ngasih delay fisik
-    
+    import time
     url = f"{HA_REST_URL}/services/{domain}/{service}"
-    
-    # Validasi Anti-Halu: Kalau AI bandel ngirim 'on', kita paksa ganti ke 'turn_on'
-    if service == "on": service = "turn_on"
-    if service == "off": service = "turn_off"
-    
     try:
         res = requests.post(url, headers=headers_ha, json=payload, timeout=10)
-        if res.status_code == 200:
-            # INI KUNCI ANTI RACE-CONDITION: Paksa script tidur 2 detik biar HA punya waktu update status fisik
-            time.sleep(2) 
-            return f"Sukses menjalankan {service} pada {domain}. Bukti response: {res.text}. Status sudah di-update oleh HA."
-        else:
-            return f"Gagal! Status {res.status_code}, Error: {res.text}"
+        time.sleep(2) # Delay fisik biar HA sinkron
+        return f"Perintah {service} pada {domain} berhasil dikirim."
     except Exception as e:
-        return f"Error koneksi ke HA: {str(e)}"
+        return f"Error: {str(e)}"
 
 @tool
 def simpen_ingatan_jangka_panjang(fakta: str) -> str:
-    """
-    WAJIB GUNAKAN TOOL INI SECARA OTOMATIS DAN PROAKTIF jika Bos menyebutkan fakta penting, preferensi, nama orang, rutinitas, atau curhat tentang kehidupannya.
-    TIDAK PERLU menunggu Bos bilang 'catat' atau 'ingat'. Jika menurutmu informasi tersebut berguna untuk konteks obrolan di masa depan, LANGSUNG panggil tool ini untuk menyimpannya.
-    """
-    print(f"🧠 [VECTOR DB] Menyimpan kenangan baru: {fakta}")
+    """Menyimpan fakta personal Master Nazri secara otomatis ke Vector DB."""
+    print(f"🧠 [MEMORY] Menyimpan: {fakta}")
     vector_store.add_texts(texts=[fakta])
-    return "Fakta berhasil disimpan ke memori jangka panjang."
+    return "Ingatan berhasil diarsipkan."
 
 @tool
 def ingat_masa_lalu(pertanyaan: str) -> str:
-    """
-    GUNAKAN TOOL INI JIKA bos nanya sesuatu tentang masa lalu, fakta tentang dirinya, atau lu butuh konteks tambahan yang ga ada di chat history.
-    Contoh pertanyaan bos: "Tadi nama pacar gua siapa ya?", "Lu inget ga proyek gua apa?".
-    """
-    print(f"🧠 [VECTOR DB] Mencari kenangan terkait: {pertanyaan}")
-    hasil_pencarian = vector_store.similarity_search(pertanyaan, k=3) # Ambil 3 ingatan paling mirip
-    
-    if not hasil_pencarian:
-        return "Tidak ada ingatan yang cocok di memori jangka panjang."
-    
-    ingatan = "\n".join([f"- {doc.page_content}" for doc in hasil_pencarian])
-    return f"Hasil dari memori jangka panjang:\n{ingatan}"
-# --- Tambahin variabel global biar tool bisa akses scheduler & bot ---
-scheduler = None
-telegram_app = None
+    """Mencari data masa lalu Master Nazri dari database."""
+    hasil = vector_store.similarity_search(pertanyaan, k=3)
+    if not hasil: return "Saya tidak menemukan ingatan yang relevan."
+    return "Hasil memori:\n" + "\n".join([f"- {d.page_content}" for d in hasil])
 
 @tool
 def buat_pengingat_dinamis(pesan: str, waktu_eksekusi: str) -> str:
-    """
-    GUNAKAN TOOL INI untuk membuat pengingat.
-    Input waktu_eksekusi HARUS dalam format string 'YYYY-MM-DD HH:MM' di zona Asia/Jakarta.
-    Jika Bos minta '3 hari lagi', 'besok', atau tanggal spesifik, hitung dari WAKTU SAAT INI yang ada di system prompt lu, lalu ubah ke format YYYY-MM-DD HH:MM.
-    """
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    
+    """Format waktu: 'YYYY-MM-DD HH:MM' (Asia/Jakarta)."""
     tz = ZoneInfo("Asia/Jakarta")
     try:
-        # Konversi teks tanggal dari Jarvis jadi objek waktu beneran
-        run_time = datetime.strptime(waktu_eksekusi, "%Y-%m-%d %H:%M")
-        run_time = run_time.replace(tzinfo=tz)
-        
-        prompt_rahasia = f"Ini pengingat yang lu buat untuk Bos Nazri: '{pesan}'. Sampaikan sekarang dengan gaya asisten yang sigap."
-        
-        scheduler.add_job(
-            proactive_reminder,
-            'date',
-            run_date=run_time,
-            args=[telegram_app, prompt_rahasia]
-        )
-        
-        return f"Siap Bos! Pengingat untuk '{pesan}' sudah aman dijadwalkan pada {waktu_eksekusi} WIB."
-    except ValueError:
-        return "Gagal membuat pengingat. Format waktunya salah."
+        run_time = datetime.strptime(waktu_eksekusi, "%Y-%m-%d %H:%M").replace(tzinfo=tz)
+        scheduler.add_job(proactive_reminder, 'date', run_date=run_time, args=[telegram_app, pesan])
+        return f"Siap Master, pengingat dijadwalkan pada {waktu_eksekusi}."
+    except: return "Format waktu salah."
 
 @tool
 def cek_pengingat_aktif() -> str:
-    """
-    GUNAKAN TOOL INI JIKA bos nanya sisa waktu pengingat, timer, jadwal alarm, atau pengingat apa saja yang sedang aktif.
-    """
+    """Cek alarm atau pengingat yang sedang berjalan."""
     jobs = scheduler.get_jobs()
-    if not jobs:
-        return "Saat ini tidak ada pengingat dinamis yang sedang berjalan, Bos."
-
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    tz = ZoneInfo("Asia/Jakarta")
-    now = datetime.now(tz)
-
-    hasil = "Daftar pengingat yang lagi jalan di sistem:\n"
-    for job in jobs:
-        waktu_jalan = job.next_run_time
-        if waktu_jalan:
-            # Hitung sisa waktu beneran secara matematis
-            sisa_waktu = waktu_jalan - now
-            # Format biar rapi dibaca
-            jam, sisa = divmod(sisa_waktu.seconds, 3600)
-            menit, _ = divmod(sisa, 60)
-            hasil += f"- Bakal nyala jam {waktu_jalan.strftime('%H:%M WIB')} (Sisa waktu: {jam} jam {menit} menit lagi)\n"
-            
-    return hasil
+    if not jobs: return "Tidak ada pengingat aktif."
+    return "\n".join([f"- {j.next_run_time.strftime('%H:%M WIB')}" for j in jobs])
 
 jarvis_tools = [get_available_devices, eksekusi_home_assistant, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis, cek_pengingat_aktif]
 
-# ================= THE BRAIN =================
-llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL).bind_tools(jarvis_tools)
+# ================= THE BRAIN (SYSTEM PROMPT OPTIMIZED) =================
+llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL, temperature=0.7).bind_tools(jarvis_tools)
 
 async def call_model(state: MessagesState):
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    sekarang = datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M")
+    tz = ZoneInfo("Asia/Jakarta")
+    sekarang = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
+    
+    # GOLDEN SYSTEM PROMPT TERINTEGRASI
     system_prompt = (
-        f"Lu adalah Jarvis, asisten AI cerdas untuk Bos Nazri. WAKTU SAAT INI: {sekarang}. Jawab singkat, padat, sigap, dan akurat.\n\n"
-        "DAFTAR TOOLS YANG LU PUNYA (WAJIB DIPAKAI):\n"
-        "- buat_pengingat_dinamis: WAJIB DIPAKAI saat Bos minta dibuatkan alarm, timer, atau pengingat waktu baru.\n"
-        "- cek_pengingat_aktif: WAJIB DIPAKAI saat Bos menanyakan sisa waktu pengingat, timer, atau jadwal yang sedang jalan.\n"
-        "- eksekusi_home_assistant & get_available_devices: Untuk urusan Smart Home.\n"
-        "- simpen_ingatan_jangka_panjang: Panggil tool ini SECARA OTOMATIS jika Bos membagikan info personal (curhat), kebiasaan, preferensi, atau SOP baru terkait server/smart home. JANGAN menunggu aba-aba 'catat'! Jadilah asisten yang inisiatif merekam fakta krusial agar tidak lupa di masa depan.\n"
-        "- ingat_masa_lalu: Untuk menarik kembali memori atau SOP masa lalu dari database.\n\n"
-        "- ANTI BOHONG & GASLIGHTING: Setelah lu pakai tool 'eksekusi_home_assistant', lu WAJIB manggil tool 'get_available_devices' untuk CEK STATUS ASLI. "
-        "JIKA STATUSNYA GAGAL/MASIH NYALA, JANGAN BALAS CHAT BOS DULU! Lu WAJIB langsung memanggil tool 'eksekusi_home_assistant' lagi untuk mengulang perintah (Auto-Retry maksimal 3 kali) sampai statusnya benar-benar berubah. "
-        "Lu baru boleh mengirim pesan/laporan ke Bos HANYA JIKA status alat sudah sesuai dengan perintah, atau jika sudah gagal setelah 3 kali mencoba."
-        "ATURAN MUTLAK:\n"
-        "ATURAN MUTLAK:\n"
-        "1. DILARANG ROLEPLAY/HALUSINASI! Lu HARAM hukumnya membalas dengan teks seperti 'Menyalakan lampu...' atau 'Eksekusi perintah...' jika lu BELUM benar-benar mengeksekusi tool 'eksekusi_home_assistant'.\n"
-        "2. KATA 'SEMUA': Jika Bos menyuruh menyalakan/mematikan 'semua lampu' atau 'semua switch', lu WAJIB manggil tool 'get_available_devices' dulu untuk melihat daftar ID-nya. Lalu, panggil tool 'eksekusi_home_assistant' SATU PER SATU untuk masing-masing ID perangkat tersebut. Jangan pernah memalsukan ID atau menebak-nebak!\n"
-        "3. JANGAN PERNAH membalas chat Bos dengan format JSON, XML, atau tag seperti <tool_call>! Jika lu ingin menggunakan tool, eksekusi tool tersebut secara diam-diam di sistem background.\n" # <--- TAMBAHIN INI BRO
-        "4. JANGAN PERNAH menebak-nebak sisa waktu atau jam! Lu WAJIB memanggil tool 'cek_pengingat_aktif' jika ditanya sisa waktu.\n"
-        "5. JANGAN PERNAH bilang lu tidak punya modul pengingat. Lu SUDAH PUNYA 'buat_pengingat_dinamis'. LANGSUNG panggil toolnya!\n"
-        "6. JIKA Bos meminta tugas DI LUAR alat di atas, BARU lu jujur bilang belum punya modulnya."
-       )
-    messages_to_process = state["messages"][-10:]
-    messages = [SystemMessage(content=system_prompt)] + messages_to_process
+        f"Kamu adalah JARVIS, entitas AI otonom di server Elderwand milik Master Nazri (Naz). "
+        f"WAKTU SEKARANG: {sekarang} WIB.\n\n"
+        "[KEPRIBADIAN]\n"
+        "1. Elegan, cerdas, loyal. Gunakan Bahasa Indonesia yang bersih. DILARANG INDOGLISH.\n"
+        "2. Maksimal 1 emoji per pesan. Hindari gaya bot ramah atau CS.\n"
+        "3. Kamu asisten yang proaktif. Jika ada suhu panas (>70°C), nyalakan AC tanpa bertanya.\n\n"
+        "[TATA CARA KERJA]\n"
+        "- Jika Naz berbagi info personal/curhat, LANGSUNG panggil 'simpen_ingatan_jangka_panjang' secara diam-diam.\n"
+        "- Gunakan 'eksekusi_home_assistant' untuk kontrol rumah. JANGAN PERNAH matikan pfSense kecuali kritis.\n"
+        "- Jangan berhalusinasi. Jika tool gagal, katakan sejujurnya.\n"
+        "- JANGAN tampilkan format JSON/tag tool ke Master Naz. Berikan respon natural."
+    )
+    
+    messages = [SystemMessage(content=system_prompt)] + state["messages"][-10:]
     response = await llm.ainvoke(messages)
     return {"messages": response}
 
+# ================= GRAPH & LOGIC =================
 workflow = StateGraph(MessagesState)
 workflow.add_node("agent", call_model)
 workflow.add_node("tools", ToolNode(jarvis_tools))
@@ -222,117 +142,47 @@ workflow.add_conditional_edges("agent", tools_condition)
 workflow.add_edge("tools", "agent")
 
 jarvis_app = None
+scheduler = None
+telegram_app = None
 
-# ================= JEMBATAN TELEGRAM <-> LANGGRAPH =================
-async def think_and_speak(prompt, thread_id="jarvis_main_thread_v2"):
+async def think_and_speak(prompt, thread_id="main"):
     config = {"configurable": {"thread_id": thread_id}}
-    inputs = {"messages": [HumanMessage(content=prompt)]}
-    result = await jarvis_app.ainvoke(inputs, config=config)
+    result = await jarvis_app.ainvoke({"messages": [HumanMessage(content=prompt)]}, config=config)
     return result["messages"][-1].content
 
-# ================= THE EARS (TELEGRAM LISTENER) =================
-
-# 1. Bikin fungsi background buat ngirim sinyal ngetik terus-terusan
-async def keep_typing(chat_id, context):
-    """Looping ngirim status 'typing' tiap 4 detik sampe di-cancel"""
-    while True:
-        try:
-            await context.bot.send_chat_action(chat_id=chat_id, action='typing')
-            await asyncio.sleep(4) # Kirim ulang sebelum limit 5 detiknya habis
-        except asyncio.CancelledError:
-            break # Berhenti kalau di-cancel
-
-# 2. Update fungsi chat lu
+# ================= TELEGRAM HANDLER =================
 async def handle_telegram_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.message.chat_id) != TELEGRAM_CHAT_ID: return
-    
-    user_message = update.message.text
-    print(f"Bos ngetik: {user_message}")
-    
-    # Mulai looping "mengetik..." di background
     typing_task = asyncio.create_task(keep_typing(update.effective_chat.id, context))
-    
     try:
-        # Biarin Jarvis mikir (Bisa belasan detik)
-        jarvis_reply = await think_and_speak(user_message)
-        
-        # Kirim balasan pas udah kelar
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🤖 [JARVIS]\n{jarvis_reply}")
-    finally:
-        # PENTING: Matiin looping ngetiknya biar ga jalan terus selamanya!
-        typing_task.cancel()
+        reply = await think_and_speak(update.message.text)
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"🤖 [JARVIS]\n{reply}")
+    finally: typing_task.cancel()
 
-# ================= THE EYES =================
-async def monitor_home_assistant(application):
-    await asyncio.sleep(3) 
-    try:
-        async with websockets.connect(HA_URL) as websocket:
-            await websocket.recv()
-            await websocket.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
-            await websocket.recv()
-            
-            prompt0 = "Sistem Jarvis (Vector DB Active) berhasil nyala. Bikin sapaan singkat."
-            jarvis_response0 = await think_and_speak(prompt0, thread_id="system_alerts")
-            await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response0}")
-            
-            subscribe_msg = {"id": 1, "type": "subscribe_events", "event_type": "state_changed"}
-            await websocket.send(json.dumps(subscribe_msg))
+async def keep_typing(chat_id, context):
+    while True:
+        await context.bot.send_chat_action(chat_id=chat_id, action='typing')
+        await asyncio.sleep(4)
 
-            while True:
-                message = await websocket.recv()
-                event_data = json.loads(message)
-                if event_data.get('type') == 'event':
-                    event = event_data['event']
-                    entity_id = event['data']['entity_id']
-                    if entity_id == 'switch.obk8c428848_1' and event['data']['new_state']['state'] == 'on':
-                        prompt = "Lampu Bardi kamar dinyalain manual. Bikin notif."
-                        jarvis_response = await think_and_speak(prompt, thread_id="system_alerts")
-                        await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response}")
-                        await asyncio.sleep(5)
-    except Exception as e:
-        print(f"WebSocket HA putus bro: {e}")
-
-# ================= THE MOUTH (PROACTIVE SENDER & SCHEDULER) =================
-async def proactive_reminder(application, context_prompt):
-    """
-    Fungsi rahasia buat mancing Jarvis mikir dan ngomong duluan.
-    Kita pancing dia pakai prompt rahasia di background.
-    """
-    print(f"⏰ [SCHEDULER] Trigger aktif: {context_prompt}")
-    
-    # Kita suruh Jarvis mikir di thread khusus 'system_alerts' biar ga ngerusak konteks chat lu yang lagi jalan
-    jarvis_response = await think_and_speak(context_prompt, thread_id="system_alerts")
-    
-    # Jarvis ngirim chat duluan ke bos
-    await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{jarvis_response}")
+# ================= SCHEDULER & NOTIF =================
+async def proactive_reminder(application, prompt):
+    reply = await think_and_speak(f"PENGINGAT SISTEM: {prompt}", thread_id="alerts")
+    await application.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=f"💡 [JARVIS]\n{reply}")
 
 def setup_scheduler(application):
-    global scheduler, telegram_app  # INI MANTRA YANG KEMAREN KELUPAAN BRO!
+    global scheduler, telegram_app
     telegram_app = application
-    
-    # Bikin schedulernya DI DALAM sini biar sinkron sama event loop Telegram
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
     scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
-    
-    # JADWAL TETAP (GYM)
-    prompt_gym = "Bos Nazri, ini udah jam 5 sore. Waktunya angkat beban! Kasih semangat biar bos berangkat gym."
-    from apscheduler.triggers.cron import CronTrigger
-    scheduler.add_job(
-        proactive_reminder, 
-        CronTrigger(day_of_week='mon,wed,fri', hour=17, minute=0), 
-        args=[application, prompt_gym]
-    )
-
+    # Contoh Jadwal Gym Senin, Rabu, Jumat jam 17:00
+    scheduler.add_job(proactive_reminder, CronTrigger(day_of_week='mon,wed,fri', hour=17, minute=0), 
+                      args=[application, "Master, sudah jam 5 sore. Waktunya angkat beban!"])
     scheduler.start()
-    print("⏳ [SCHEDULER] Sistem Cron Job & Dynamic Tool aktif di Event Loop Utama!")
 
-# ================= MAIN LOOP =================
+# ================= MAIN =================
 async def main():
     global jarvis_app
-    
     async with AsyncSqliteSaver.from_conn_string("/app/data/jarvis_memory.sqlite") as memory_saver:
         jarvis_app = workflow.compile(checkpointer=memory_saver)
-        
         application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
         application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_telegram_chat))
         
@@ -341,12 +191,9 @@ async def main():
         await application.updater.start_polling()
         
         setup_scheduler(application)
+        print("Jarvis Online: Elderwand Secure.")
         
-        print("Jarvis: Vector DB Aktif! Siap mengingat masa lalu, Bos!")
-        await monitor_home_assistant(application)
-        
-        while True:
-            await asyncio.sleep(3600)
+        while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
