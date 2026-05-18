@@ -108,7 +108,7 @@ def cek_pengingat_aktif() -> str:
 jarvis_tools = [get_available_devices, eksekusi_home_assistant, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis, cek_pengingat_aktif]
 
 # ================= THE BRAIN (SYSTEM PROMPT OPTIMIZED) =================
-llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL, temperature=0.7).bind_tools(jarvis_tools)
+llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL, temperature=0.5).bind_tools(jarvis_tools)
 
 async def call_model(state: MessagesState):
     tz = ZoneInfo("Asia/Jakarta")
@@ -125,7 +125,8 @@ async def call_model(state: MessagesState):
         "[TATA CARA KERJA]\n"
         "- Jika Naz berbagi info personal/curhat, LANGSUNG panggil 'simpen_ingatan_jangka_panjang' secara diam-diam.\n"
         "- Gunakan 'eksekusi_home_assistant' untuk kontrol rumah. JANGAN PERNAH matikan pfSense kecuali kritis.\n"
-        "- Jangan berhalusinasi. Jika tool gagal, katakan sejujurnya.\n"
+        "- Jangan berhalusinasi. Jika ditanya hal fisik yang tidak bisa dilihat, tolak dengan sarkas.\n"
+        "- PENTING: Jika kamu menggunakan tool, SETELAH menerima hasil tool, kamu WAJIB memberikan konfirmasi verbal bernada sarkas kepada Master Naz. JANGAN BISU.\n"
         "- JANGAN tampilkan format JSON/tag tool ke Master Naz. Berikan respon natural."
     )
     
