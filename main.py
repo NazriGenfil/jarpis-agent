@@ -70,16 +70,13 @@ def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     try:
         res = requests.post(url, headers=headers_ha, json=payload, timeout=10)
         
+        # Jika HTTP status bukan 200, baru fix servernya bermasalah
         if res.status_code != 200:
-            return f"GAGAL: HA menolak (Error {res.status_code})."
+            return f"GAGAL: Home Assistant menolak dengan Error {res.status_code}."
             
-        # --- DETEKTOR KEBOHONGAN HA ---
-        data = res.json()
-        if not data: # Kalau HA balas [] (list kosong), berarti ID-nya salah/nggak ada!
-            return f"GAGAL: Perintah terkirim, TAPI 'entity_id' {payload.get('entity_id')} TIDAK DITEMUKAN di Home Assistant! Tolong gunakan tool get_available_devices untuk mengecek ID yang benar."
-            
-        time.sleep(2)
-        return f"Perintah {service} pada {domain} beneran sukses dieksekusi."
+        # KITA HAPUS CEK 'if not data' KARENA HA SERING BALIKIN [] UNTUK MQTT/OPENBEKEN
+        time.sleep(2) # Delay fisik biar saklar sinkron
+        return f"Perintah {service} pada {domain} sukses dieksekusi ke perangkat."
     except Exception as e:
         return f"Error: {str(e)}"
 
