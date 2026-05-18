@@ -62,7 +62,6 @@ async def get_available_devices() -> str:
     return "Status Perangkat:\n" + "\n".join(available)
 
 @tool
-@tool
 def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     """Kontrol perangkat Smart Home (AC, Lampu, Switch)."""
     import requests
