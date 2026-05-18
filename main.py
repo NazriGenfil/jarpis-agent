@@ -62,6 +62,7 @@ async def get_available_devices() -> str:
     return "Status Perangkat:\n" + "\n".join(available)
 
 @tool
+@tool
 def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     """Kontrol perangkat Smart Home (AC, Lampu, Switch)."""
     import requests
@@ -69,6 +70,11 @@ def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     url = f"{HA_REST_URL}/services/{domain}/{service}"
     try:
         res = requests.post(url, headers=headers_ha, json=payload, timeout=10)
+        
+        # CEGAH HA NGE-PRANK JARVIS
+        if res.status_code != 200:
+            return f"GAGAL: Home Assistant menolak (Error {res.status_code}). Pastikan entity_id '{payload.get('entity_id')}' itu benar dan ada."
+            
         time.sleep(2) # Delay fisik biar HA sinkron
         return f"Perintah {service} pada {domain} berhasil dikirim."
     except Exception as e:
