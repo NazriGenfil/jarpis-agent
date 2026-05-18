@@ -70,12 +70,16 @@ def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     try:
         res = requests.post(url, headers=headers_ha, json=payload, timeout=10)
         
-        # CEGAH HA NGE-PRANK JARVIS
         if res.status_code != 200:
-            return f"GAGAL: Home Assistant menolak (Error {res.status_code}). Pastikan entity_id '{payload.get('entity_id')}' itu benar dan ada."
+            return f"GAGAL: HA menolak (Error {res.status_code})."
             
-        time.sleep(2) # Delay fisik biar HA sinkron
-        return f"Perintah {service} pada {domain} berhasil dikirim."
+        # --- DETEKTOR KEBOHONGAN HA ---
+        data = res.json()
+        if not data: # Kalau HA balas [] (list kosong), berarti ID-nya salah/nggak ada!
+            return f"GAGAL: Perintah terkirim, TAPI 'entity_id' {payload.get('entity_id')} TIDAK DITEMUKAN di Home Assistant! Tolong gunakan tool get_available_devices untuk mengecek ID yang benar."
+            
+        time.sleep(2)
+        return f"Perintah {service} pada {domain} beneran sukses dieksekusi."
     except Exception as e:
         return f"Error: {str(e)}"
 
