@@ -149,7 +149,31 @@ telegram_app = None
 async def think_and_speak(prompt, thread_id="main"):
     config = {"configurable": {"thread_id": thread_id}}
     result = await jarvis_app.ainvoke({"messages": [HumanMessage(content=prompt)]}, config=config)
-    return result["messages"][-1].content
+    
+    # === CCTV LOGGING KE PORTAINER ===
+    print("\n" + "="*40)
+    print("🧠 ISI KEPALA JARVIS (LANGGRAPH) 🧠")
+    for msg in result["messages"]:
+        tipe = type(msg).__name__
+        isi = msg.content.strip() if msg.content else "[KOSONG]"
+        print(f"-> {tipe}: {isi[:100]}...") # Print 100 huruf pertama
+        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+            print(f"   ⚙️ MANGGIL TOOL: {msg.tool_calls}")
+    print("="*40 + "\n")
+    # =================================
+
+    final_message = result["messages"][-1]
+    
+    # CEGAH TELEGRAM BISU
+    if not final_message.content or final_message.content.strip() == "":
+        # Kalau AI bisu setelah jalanin tool, kita ambil jawaban dari hasil tool-nya langsung
+        if len(result["messages"]) >= 2 and type(result["messages"][-2]).__name__ == "ToolMessage":
+            hasil_tool = result["messages"][-2].content
+            return f"(Mengangguk diam) Tindakan dieksekusi di latar belakang, Sir. Laporan sistem: {hasil_tool}"
+        else:
+            return "Maaf Sir, saya sedang memproses sesuatu namun modul bahasa saya tersendat."
+            
+    return final_message.content
 
 # ================= TELEGRAM HANDLER =================
 async def handle_telegram_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
