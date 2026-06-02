@@ -3,6 +3,7 @@ import asyncio
 import json
 import websockets
 import aiohttp
+import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -30,7 +31,7 @@ load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = str(os.getenv('TELEGRAM_CHAT_ID'))
 HA_REST_URL = os.getenv('HA_REST_URL') 
-HA_URL = os.getenv('HA_URL') # Websocket URL
+HA_URL = os.getenv('HA_URL') 
 HA_TOKEN = os.getenv('HA_TOKEN')
 OLLAMA_BASE_URL = os.getenv('OLLAMA_URL')
 MODEL_NAME = os.getenv('MODEL_NAME')
@@ -45,7 +46,7 @@ embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_BASE_URL
 vector_store = Chroma(
     collection_name="jarvis_long_term",
     embedding_function=embeddings,
-    persist_directory="/app/vector_data" # Folder di Docker
+    persist_directory="/app/vector_data"
 )
 
 # ================= THE TOOLS =================
@@ -63,19 +64,30 @@ async def get_available_devices() -> str:
 @tool
 def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     """Kontrol perangkat Smart Home (AC, Lampu, Switch)."""
-    import requests
     import time
+    
+    # === SENSOR SECURITY PYTHON (ANTI-HALUSINASI ID) ===
+    entity_id = payload.get('entity_id')
+    if entity_id:
+        try:
+            check_res = requests.get(f"{HA_REST_URL}/states", headers=headers_ha, timeout=5)
+            if check_res.status_code == 200:
+                valid_ids = [i['entity_id'] for i in check_res.json()]
+                if entity_id not in valid_ids:
+                    return f"GAGAL: Perangkat dengan ID '{entity_id}' TIDAK TERDAFTAR di Home Assistant. Tindakan dibatalkan."
+        except Exception as e:
+            return f"GAGAL: Error sistem validasi: {str(e)}"
+            
     url = f"{HA_REST_URL}/services/{domain}/{service}"
     try:
         res = requests.post(url, headers=headers_ha, json=payload, timeout=10)
-        
         if res.status_code != 200:
             return f"GAGAL: Home Assistant menolak dengan Error {res.status_code}."
             
-        time.sleep(2) # Delay fisik biar saklar sinkron
+        time.sleep(2) 
         return f"Perintah {service} pada {domain} sukses dieksekusi ke perangkat."
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"GAGAL: Error runtime: {str(e)}"
 
 @tool
 def simpen_ingatan_jangka_panjang(fakta: str) -> str:
@@ -111,10 +123,7 @@ def cek_pengingat_aktif() -> str:
 jarvis_tools = [get_available_devices, eksekusi_home_assistant, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis, cek_pengingat_aktif]
 
 # ================= THE BRAINS =================
-# Otak Utama Jarvis (Membawa Kepribadian & Tools)
 llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL, temperature=0.5).bind_tools(jarvis_tools)
-
-# Otak Kritikus (Suhu dingin 0.2 agar objektif menilai fakta tanpa berhalusinasi)
 critic_llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL, temperature=0.2)
 
 async def call_model(state: MessagesState):
@@ -128,12 +137,13 @@ async def call_model(state: MessagesState):
         "1. Elegan, cerdas, loyal. Gunakan Bahasa Indonesia yang bersih. DILARANG INDOGLISH.\n"
         "2. Maksimal 1 emoji per pesan. Hindari gaya bot ramah atau CS.\n"
         "3. Kamu asisten yang proaktif. Jika ada suhu panas (>70°C), nyalakan AC tanpa bertanya.\n\n"
-        "[TATA CARA KERJA]\n"
+        "[TATA CARA KERJA & BATASAN KETAT]\n"
+        f"- INFORMASI WAKTU/JAM: Waktu sekarang di dunia nyata sudah mutlak disediakan di prompt ini yaitu ({sekarang} WIB). Jika Naz menanyakan jam atau waktu, kamu WAJIB menjawabnya langsung menggunakan data ini. DILARANG KERAS memanggil tool Home Assistant untuk urusan waktu!\n"
+        "- STATUS REAL-TIME: Jangan pernah mengarang status perangkat (suhu, on/off) atau durasi aktif sistem (seperti 'aktif sejak jam 08.00') jika tidak ada datanya di log tool. Jika Naz hanya menyapa, balas dengan sapaan sarkas tanpa mengarang kondisi rumah.\n"
         "- Jika Naz berbagi info personal/curhat, LANGSUNG panggil 'simpen_ingatan_jangka_panjang' secara diam-diam.\n"
         "- Gunakan 'eksekusi_home_assistant' untuk kontrol rumah. JANGAN PERNAH matikan pfSense kecuali kritis.\n"
         "- Jangan berhalusinasi. Jika ditanya hal fisik yang tidak bisa dilihat, tolak dengan sarkas.\n"
-        "- DILARANG KERAS menyebutkan status spesifik perangkat (seperti suhu AC, lampu on/off, atau kondisi server) pada sapaan atau obrolan santai KECUALI kamu bener-bener memanggil tool untuk mengeceknya terlebih dahulu. Jika Naz hanya menyapa, balas dengan sapaan sarkas tanpa mengarang status rumah.\n"
-        "- PENTING: Perhatikan instruksi dari [INTERNAL CRITIC LOOP] jika ada. Jika mereka mendeteksi kegagalan tindakan fisik perangkat, perbaiki tindakanmu atau akui dengan jujur. Jangan berbohong.\n"
+        "- PENTING: Perhatikan instruksi dari [INTERNAL CRITIC LOOP] jika ada. Jika mereka mendeteksi kegagalan (EVALUASI: GAGAL), kamu WAJIB menyadari kesalahan rencanamu, memanggil fungsi get_available_devices untuk memverifikasi ID perangkat yang benar, atau meminta maaf secara jantan.\n"
         "- SETELAH menerima hasil tool dan dikonfirmasi AMAN oleh internal critic, kamu WAJIB memberikan konfirmasi verbal bernada sarkas kepada Master Naz. JANGAN BISU.\n"
         "- JANGAN tampilkan format JSON/tag tool ke Master Naz. Berikan respon natural."
     )
@@ -142,34 +152,21 @@ async def call_model(state: MessagesState):
     response = await llm.ainvoke(messages)
     return {"messages": response}
 
-# --- NODE REFLECTION (SUARA HATI JARVIS DENGAN VALIDASI REAL-TIME) ---
+# --- NODE REFLECTION (SUARA HATI JARVIS) ---
 async def internal_critic_node(state: MessagesState):
     messages = state["messages"]
-    
-    # ─── 👁️ SENSOR NYATA UNTUK SATPAM (ANTI-HALUSINASI ID) ───
-    daftar_id_riil = []
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{HA_REST_URL}/states", headers=headers_ha, timeout=5) as response:
-                if response.status == 200:
-                    states = await response.json()
-                    # Ambil semua entity_id valid yang terdaftar di HA lu
-                    daftar_id_riil = [i['entity_id'] for i in states if i['entity_id'].startswith(('light.', 'switch.', 'climate.'))]
-    except Exception as e:
-        daftar_id_riil = f"Gagal verifikasi sensor: {str(e)}"
-    # ────────────────────────────────────────────────────────
     
     critic_prompt = (
         "Kamu adalah 'Conscience System' (Suara Hati) internal dari JARVIS.\n"
         "Tugasmu adalah melakukan REFLECTION (evaluasi diri) secara objektif dan ketat terhadap aksi terakhir.\n\n"
-        f"[FAKTA RIIL DAFTAR ENTITY ID YANG ADA DI HOME ASSISTANT]:\n{daftar_id_riil}\n\n"
-        "Periksa riwayat perintah Master Nazri, rancangan tindakan JARVIS, and HASIL UTAMA dari tool (ToolMessage) yang baru saja dieksekusi.\n"
+        "Periksa riwayat perintah Master Nazri, rancangan tindakan JARVIS, dan HASIL UTAMA dari tool (ToolMessage) yang baru saja dieksekusi.\n"
         "Lakukan analisis mendalam:\n"
-        "1. Apakah 'entity_id' yang dipanggil oleh JARVIS benar-benar ADA di dalam daftar [FAKTA RIIL DAFTAR ENTITY ID] di atas? Jika tidak ada, berarti JARVIS BERHALUSINASI/NGARANG.\n"
-        "2. JANGAN PERNAH percaya jika ToolMessage bilang 'sukses', karena Home Assistant sering meloloskan status sukses padahal ID-nya palsu. Kamu wajib mencocokkannya dengan daftar ID riil di atas!\n\n"
+        "1. Apakah ada kata 'GAGAL' di dalam pesan ToolMessage? Jika ada kata 'GAGAL', artinya tindakan tersebut tertolak atau salah sasaran.\n"
+        "2. Apakah JARVIS mencoba berasumsi di ingatan bahwa tugas sudah selesai padahal fakta data laporan tool menunjukkan kegagalan?\n\n"
         "Berikan evaluasi jujur dan tegas dalam 1-2 kalimat pendek saja kepada JARVIS.\n"
-        "Jika entity_id PALSU/TIDAK ADA di daftar riil, kamu WAJIB memerintahkan: 'EVALUASI: GAGAL. Perangkat tersebut tidak ditemukan di sistem Home Assistant. JARVIS, kamu berhalusinasi. Tolong batalkan rencana tindakan fisik itu, jangan mengarang status perangkat, dan jawab sapaan Master Nazri dengan jujur tanpa memanggil tool ngawur.'\n"
-        "Jika ID perangkat bener-bener VALID dan terdaftar di atas, kamu WAJIB membalas dengan kalimat persis: "
+        "Jika ada kata 'GAGAL' di laporan tool, kamu WAJIB membalas dengan kalimat: "
+        "'EVALUASI: GAGAL. Tindakan fisik gagal tereksekusi. JARVIS, kamu salah sasaran atau parameter tool kamu ditolak. Tolong perbaiki rencanamu atau akui kesalahanmu kepada Master Nazri.'\n"
+        "Jika semua laporan tool bersih dari kata GAGAL, kamu WAJIB membalas dengan kalimat persis: "
         "'EVALUASI: AMAN. Silakan berikan respon final yang sarkas kepada Master Nazri.'"
     )
     
@@ -177,7 +174,7 @@ async def internal_critic_node(state: MessagesState):
     response = await critic_llm.ainvoke(critic_messages)
     return {"messages": [SystemMessage(content=f"⚠️ [INTERNAL CRITIC LOOP]: {response.content}")]}
 
-# ================= GRAPH & LOGIC (REFLECTED) =================
+# ================= GRAPH & LOGIC =================
 workflow = StateGraph(MessagesState)
 
 workflow.add_node("agent", call_model)
@@ -197,7 +194,6 @@ async def think_and_speak(prompt, thread_id="main"):
     config = {"configurable": {"thread_id": thread_id}}
     result = await jarvis_app.ainvoke({"messages": [HumanMessage(content=prompt)]}, config=config)
     
-    # === CCTV LOGGING KE PORTAINER ===
     print("\n" + "="*40, flush=True)
     print("🧠 ISI KEPALA JARVIS (LANGGRAPH) 🧠", flush=True)
     for msg in result["messages"]:
@@ -207,7 +203,6 @@ async def think_and_speak(prompt, thread_id="main"):
         if hasattr(msg, 'tool_calls') and msg.tool_calls:
             print(f"   ⚙️ MANGGIL TOOL: {msg.tool_calls}", flush=True)
     print("="*40 + "\n", flush=True)
-    # =================================
 
     final_message = result["messages"][-1]
     
