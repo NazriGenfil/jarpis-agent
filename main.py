@@ -132,6 +132,7 @@ async def call_model(state: MessagesState):
         "- Jika Naz berbagi info personal/curhat, LANGSUNG panggil 'simpen_ingatan_jangka_panjang' secara diam-diam.\n"
         "- Gunakan 'eksekusi_home_assistant' untuk kontrol rumah. JANGAN PERNAH matikan pfSense kecuali kritis.\n"
         "- Jangan berhalusinasi. Jika ditanya hal fisik yang tidak bisa dilihat, tolak dengan sarkas.\n"
+        "- DILARANG KERAS menyebutkan status spesifik perangkat (seperti suhu AC, lampu on/off, atau kondisi server) pada sapaan atau obrolan santai KECUALI kamu bener-bener memanggil tool untuk mengeceknya terlebih dahulu. Jika Naz hanya menyapa, balas dengan sapaan sarkas tanpa mengarang status rumah.\n"
         "- PENTING: Perhatikan instruksi dari [INTERNAL CRITIC LOOP] jika ada. Jika mereka mendeteksi kegagalan tindakan fisik perangkat, perbaiki tindakanmu atau akui dengan jujur. Jangan berbohong.\n"
         "- SETELAH menerima hasil tool dan dikonfirmasi AMAN oleh internal critic, kamu WAJIB memberikan konfirmasi verbal bernada sarkas kepada Master Naz. JANGAN BISU.\n"
         "- JANGAN tampilkan format JSON/tag tool ke Master Naz. Berikan respon natural."
@@ -141,20 +142,34 @@ async def call_model(state: MessagesState):
     response = await llm.ainvoke(messages)
     return {"messages": response}
 
-# --- NODE REFLECTION (SUARA HATI JARVIS) ---
+# --- NODE REFLECTION (SUARA HATI JARVIS DENGAN VALIDASI REAL-TIME) ---
 async def internal_critic_node(state: MessagesState):
     messages = state["messages"]
+    
+    # ─── 👁️ SENSOR NYATA UNTUK SATPAM (ANTI-HALUSINASI ID) ───
+    daftar_id_riil = []
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{HA_REST_URL}/states", headers=headers_ha, timeout=5) as response:
+                if response.status == 200:
+                    states = await response.json()
+                    # Ambil semua entity_id valid yang terdaftar di HA lu
+                    daftar_id_riil = [i['entity_id'] for i in states if i['entity_id'].startswith(('light.', 'switch.', 'climate.'))]
+    except Exception as e:
+        daftar_id_riil = f"Gagal verifikasi sensor: {str(e)}"
+    # ────────────────────────────────────────────────────────
     
     critic_prompt = (
         "Kamu adalah 'Conscience System' (Suara Hati) internal dari JARVIS.\n"
         "Tugasmu adalah melakukan REFLECTION (evaluasi diri) secara objektif dan ketat terhadap aksi terakhir.\n\n"
-        "Periksa riwayat perintah Master Nazri, rancangan tindakan JARVIS, dan HASIL UTAMA dari tool (ToolMessage) yang baru saja dieksekusi.\n"
+        f"[FAKTA RIIL DAFTAR ENTITY ID YANG ADA DI HOME ASSISTANT]:\n{daftar_id_riil}\n\n"
+        "Periksa riwayat perintah Master Nazri, rancangan tindakan JARVIS, and HASIL UTAMA dari tool (ToolMessage) yang baru saja dieksekusi.\n"
         "Lakukan analisis mendalam:\n"
-        "1. Apakah tool mengembalikan data/status yang sukses dieksekusi? (Bukan pesan error atau indikasi kegagalan).\n"
-        "2. Apakah JARVIS mencoba berasumsi di ingatan bahwa tugas sudah selesai padahal data laporan tool menunjukkan kegagalan?\n\n"
+        "1. Apakah 'entity_id' yang dipanggil oleh JARVIS benar-benar ADA di dalam daftar [FAKTA RIIL DAFTAR ENTITY ID] di atas? Jika tidak ada, berarti JARVIS BERHALUSINASI/NGARANG.\n"
+        "2. JANGAN PERNAH percaya jika ToolMessage bilang 'sukses', karena Home Assistant sering meloloskan status sukses padahal ID-nya palsu. Kamu wajib mencocokkannya dengan daftar ID riil di atas!\n\n"
         "Berikan evaluasi jujur dan tegas dalam 1-2 kalimat pendek saja kepada JARVIS.\n"
-        "Jika ada ketidaksesuaian, perintahkan JARVIS untuk memperbaiki rencananya, memanggil tool yang benar, atau mengakui kegagalannya.\n"
-        "Jika eksekusi tool sudah bener-bener valid dan sukses sesuai fakta riil, kamu WAJIB membalas dengan kalimat persis: "
+        "Jika entity_id PALSU/TIDAK ADA di daftar riil, kamu WAJIB memerintahkan: 'EVALUASI: GAGAL. Perangkat tersebut tidak ditemukan di sistem Home Assistant. JARVIS, kamu berhalusinasi. Tolong batalkan rencana tindakan fisik itu, jangan mengarang status perangkat, dan jawab sapaan Master Nazri dengan jujur tanpa memanggil tool ngawur.'\n"
+        "Jika ID perangkat bener-bener VALID dan terdaftar di atas, kamu WAJIB membalas dengan kalimat persis: "
         "'EVALUASI: AMAN. Silakan berikan respon final yang sarkas kepada Master Nazri.'"
     )
     
@@ -167,12 +182,12 @@ workflow = StateGraph(MessagesState)
 
 workflow.add_node("agent", call_model)
 workflow.add_node("tools", ToolNode(jarvis_tools))
-workflow.add_node("critic", internal_critic_node) # Node Evaluasi dimasukkan
+workflow.add_node("critic", internal_critic_node)
 
 workflow.add_edge(START, "agent")
-workflow.add_conditional_edges("agent", tools_condition) # Jika butuh tool -> ke tools, jika selesai -> ke __end__
-workflow.add_edge("tools", "critic")                    # Selesai dari tool, WAJIB disidang di node critic
-workflow.add_edge("critic", "agent")                   # Dari critic balik ke agent membawa hasil evaluasi diri
+workflow.add_conditional_edges("agent", tools_condition) 
+workflow.add_edge("tools", "critic")                    
+workflow.add_edge("critic", "agent")                   
 
 jarvis_app = None
 scheduler = None
