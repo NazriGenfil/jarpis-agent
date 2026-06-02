@@ -41,7 +41,6 @@ headers_ha = {
 }
 
 # ================= SETUP VECTOR DB (LONG TERM MEMORY) =================
-# Pastikan persist_directory ini sinkron dengan folder jarvis_vector_data di Elderwand
 embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_BASE_URL)
 vector_store = Chroma(
     collection_name="jarvis_long_term",
@@ -70,11 +69,9 @@ def eksekusi_home_assistant(domain: str, service: str, payload: dict) -> str:
     try:
         res = requests.post(url, headers=headers_ha, json=payload, timeout=10)
         
-        # Jika HTTP status bukan 200, baru fix servernya bermasalah
         if res.status_code != 200:
             return f"GAGAL: Home Assistant menolak dengan Error {res.status_code}."
             
-        # KITA HAPUS CEK 'if not data' KARENA HA SERING BALIKIN [] UNTUK MQTT/OPENBEKEN
         time.sleep(2) # Delay fisik biar saklar sinkron
         return f"Perintah {service} pada {domain} sukses dieksekusi ke perangkat."
     except Exception as e:
@@ -113,14 +110,17 @@ def cek_pengingat_aktif() -> str:
 
 jarvis_tools = [get_available_devices, eksekusi_home_assistant, simpen_ingatan_jangka_panjang, ingat_masa_lalu, buat_pengingat_dinamis, cek_pengingat_aktif]
 
-# ================= THE BRAIN (SYSTEM PROMPT OPTIMIZED) =================
+# ================= THE BRAINS =================
+# Otak Utama Jarvis (Membawa Kepribadian & Tools)
 llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL, temperature=0.5).bind_tools(jarvis_tools)
+
+# Otak Kritikus (Suhu dingin 0.2 agar objektif menilai fakta tanpa berhalusinasi)
+critic_llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_BASE_URL, temperature=0.2)
 
 async def call_model(state: MessagesState):
     tz = ZoneInfo("Asia/Jakarta")
     sekarang = datetime.now(tz).strftime("%Y-%m-%d %H:%M")
     
-    # GOLDEN SYSTEM PROMPT TERINTEGRASI
     system_prompt = (
         f"Kamu adalah JARVIS, entitas AI otonom di server Elderwand milik Master Nazri (Naz). "
         f"WAKTU SEKARANG: {sekarang} WIB.\n\n"
@@ -132,7 +132,8 @@ async def call_model(state: MessagesState):
         "- Jika Naz berbagi info personal/curhat, LANGSUNG panggil 'simpen_ingatan_jangka_panjang' secara diam-diam.\n"
         "- Gunakan 'eksekusi_home_assistant' untuk kontrol rumah. JANGAN PERNAH matikan pfSense kecuali kritis.\n"
         "- Jangan berhalusinasi. Jika ditanya hal fisik yang tidak bisa dilihat, tolak dengan sarkas.\n"
-        "- PENTING: Jika kamu menggunakan tool, SETELAH menerima hasil tool, kamu WAJIB memberikan konfirmasi verbal bernada sarkas kepada Master Naz. JANGAN BISU.\n"
+        "- PENTING: Perhatikan instruksi dari [INTERNAL CRITIC LOOP] jika ada. Jika mereka mendeteksi kegagalan tindakan fisik perangkat, perbaiki tindakanmu atau akui dengan jujur. Jangan berbohong.\n"
+        "- SETELAH menerima hasil tool dan dikonfirmasi AMAN oleh internal critic, kamu WAJIB memberikan konfirmasi verbal bernada sarkas kepada Master Naz. JANGAN BISU.\n"
         "- JANGAN tampilkan format JSON/tag tool ke Master Naz. Berikan respon natural."
     )
     
@@ -140,13 +141,38 @@ async def call_model(state: MessagesState):
     response = await llm.ainvoke(messages)
     return {"messages": response}
 
-# ================= GRAPH & LOGIC =================
+# --- NODE REFLECTION (SUARA HATI JARVIS) ---
+async def internal_critic_node(state: MessagesState):
+    messages = state["messages"]
+    
+    critic_prompt = (
+        "Kamu adalah 'Conscience System' (Suara Hati) internal dari JARVIS.\n"
+        "Tugasmu adalah melakukan REFLECTION (evaluasi diri) secara objektif dan ketat terhadap aksi terakhir.\n\n"
+        "Periksa riwayat perintah Master Nazri, rancangan tindakan JARVIS, dan HASIL UTAMA dari tool (ToolMessage) yang baru saja dieksekusi.\n"
+        "Lakukan analisis mendalam:\n"
+        "1. Apakah tool mengembalikan data/status yang sukses dieksekusi? (Bukan pesan error atau indikasi kegagalan).\n"
+        "2. Apakah JARVIS mencoba berasumsi di ingatan bahwa tugas sudah selesai padahal data laporan tool menunjukkan kegagalan?\n\n"
+        "Berikan evaluasi jujur dan tegas dalam 1-2 kalimat pendek saja kepada JARVIS.\n"
+        "Jika ada ketidaksesuaian, perintahkan JARVIS untuk memperbaiki rencananya, memanggil tool yang benar, atau mengakui kegagalannya.\n"
+        "Jika eksekusi tool sudah bener-bener valid dan sukses sesuai fakta riil, kamu WAJIB membalas dengan kalimat persis: "
+        "'EVALUASI: AMAN. Silakan berikan respon final yang sarkas kepada Master Nazri.'"
+    )
+    
+    critic_messages = [SystemMessage(content=critic_prompt)] + messages[-6:]
+    response = await critic_llm.ainvoke(critic_messages)
+    return {"messages": [SystemMessage(content=f"⚠️ [INTERNAL CRITIC LOOP]: {response.content}")]}
+
+# ================= GRAPH & LOGIC (REFLECTED) =================
 workflow = StateGraph(MessagesState)
+
 workflow.add_node("agent", call_model)
 workflow.add_node("tools", ToolNode(jarvis_tools))
+workflow.add_node("critic", internal_critic_node) # Node Evaluasi dimasukkan
+
 workflow.add_edge(START, "agent")
-workflow.add_conditional_edges("agent", tools_condition)
-workflow.add_edge("tools", "agent")
+workflow.add_conditional_edges("agent", tools_condition) # Jika butuh tool -> ke tools, jika selesai -> ke __end__
+workflow.add_edge("tools", "critic")                    # Selesai dari tool, WAJIB disidang di node critic
+workflow.add_edge("critic", "agent")                   # Dari critic balik ke agent membawa hasil evaluasi diri
 
 jarvis_app = None
 scheduler = None
@@ -157,22 +183,20 @@ async def think_and_speak(prompt, thread_id="main"):
     result = await jarvis_app.ainvoke({"messages": [HumanMessage(content=prompt)]}, config=config)
     
     # === CCTV LOGGING KE PORTAINER ===
-    print("\n" + "="*40)
-    print("🧠 ISI KEPALA JARVIS (LANGGRAPH) 🧠")
+    print("\n" + "="*40, flush=True)
+    print("🧠 ISI KEPALA JARVIS (LANGGRAPH) 🧠", flush=True)
     for msg in result["messages"]:
         tipe = type(msg).__name__
         isi = msg.content.strip() if msg.content else "[KOSONG]"
-        print(f"-> {tipe}: {isi[:100]}...") # Print 100 huruf pertama
+        print(f"-> {tipe}: {isi[:100]}...", flush=True)
         if hasattr(msg, 'tool_calls') and msg.tool_calls:
-            print(f"   ⚙️ MANGGIL TOOL: {msg.tool_calls}")
-    print("="*40 + "\n")
+            print(f"   ⚙️ MANGGIL TOOL: {msg.tool_calls}", flush=True)
+    print("="*40 + "\n", flush=True)
     # =================================
 
     final_message = result["messages"][-1]
     
-    # CEGAH TELEGRAM BISU
     if not final_message.content or final_message.content.strip() == "":
-        # Kalau AI bisu setelah jalanin tool, kita ambil jawaban dari hasil tool-nya langsung
         if len(result["messages"]) >= 2 and type(result["messages"][-2]).__name__ == "ToolMessage":
             hasil_tool = result["messages"][-2].content
             return f"(Mengangguk diam) Tindakan dieksekusi di latar belakang, Sir. Laporan sistem: {hasil_tool}"
@@ -204,7 +228,6 @@ def setup_scheduler(application):
     global scheduler, telegram_app
     telegram_app = application
     scheduler = AsyncIOScheduler(timezone="Asia/Jakarta")
-    # Contoh Jadwal Gym Senin, Rabu, Jumat jam 17:00
     scheduler.add_job(proactive_reminder, CronTrigger(day_of_week='mon,wed,fri', hour=17, minute=0), 
                       args=[application, "Master, sudah jam 5 sore. Waktunya angkat beban!"])
     scheduler.start()
